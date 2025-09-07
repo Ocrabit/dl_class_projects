@@ -1,0 +1,48 @@
+program: train.py
+method: grid
+metric:
+  goal: minimize
+  name: val_loss
+parameters:
+  dropout:
+    values: [0.25]
+
+  batch_size:
+    values: [128]
+
+  learning_rate:
+    values: [0.001]
+
+  base_channels:
+    values: [32]
+
+  channel_mult:
+    values: [2]
+
+  n_conv_layers:
+    values: [10]
+
+  apply_dropout_at:
+    values: [2]
+
+  activation:
+    values: ["ReLU"]
+
+  kernel_size:
+    values: [3]
+  stride:
+    values: [2]
+  padding:
+    values: [1]
+
+  epochs:
+    value: 30
+
+# Uses uv package management
+command:
+  - ${env}
+  - uv
+  - run
+  - python
+  - train.py
+  - ${args}
