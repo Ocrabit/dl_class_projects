@@ -198,11 +198,12 @@ def train():
             "test_accuracy": test_acc
         })
 
-        print(
-            f'Epoch {epoch + 1}: Train Loss: {epoch_loss:.4f}, Train Acc: {train_acc:.2f}%, Test Acc: {test_acc:.2f}%')
+        #print(f'Epoch {epoch + 1}: Train Loss: {epoch_loss:.4f}, Train Acc: {train_acc:.2f}%, Test Acc: {test_acc:.2f}%')
+
+    save_path = os.path.join(wandb.run.dir, "model.pt")
+    torch.save(model.state_dict(), save_path)
 
     wandb.finish()
-    torch.save(model.state_dict(), os.path.join(wandb.run.dir, "model.pt"))
 
 
 if __name__ == "__main__":
