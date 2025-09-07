@@ -17,7 +17,8 @@ hyperparameter_defaults = dict(
 
     base_channels=32,
     channel_mult=2,
-    n_conv_layers=10,
+    n_conv_layers=2,
+    max_channels=128,
 
     apply_dropout_at=2,
 
@@ -53,11 +54,13 @@ class CNN(nn.Module):
         stride = config.stride
         padding = config.padding
 
+        max_channels = config.max_channels
+
         # Build conv layers dynamically
         self.conv_layers = nn.ModuleList()
         in_channels = shape_info['num_channels']
         for i in range(self.n_conv_layers):
-            out_channels = self.base_channels * (self.channel_mult ** i)
+            out_channels = min(max_channels, self.base_channels * (self.channel_mult ** i))
             self.conv_layers.append(
                 nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
             )
@@ -115,6 +118,9 @@ def initialize_dataset():
 def train():
     # Select Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    if device.type == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
 
     # Initialize Dataset
     train_dataset, test_dataset, train_loader, test_loader, shape_info = initialize_dataset()

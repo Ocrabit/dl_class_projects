@@ -5,9 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "numpy>=2.3.2",
-    "torch>=2.8.0",
-    "torchvision>=0.23.0",
-    "tqdm>=4.67.1",
-    "wandb>=0.21.3",
+    "numpy>=2.1.2",
+    "tqdm>=4.66.5",
+    "wandb>=0.21.3"
+]
+
+# CPU build (Mac, CI, or non-CUDA systems)
+cpu = [
+  "torch>=2.6,<2.7",
+  "torchvision>=0.21,<0.22",
+  "torchaudio>=2.6,<2.7",
 ]

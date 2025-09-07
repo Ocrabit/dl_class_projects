@@ -20,7 +20,7 @@ parameters:
     values: [2]
 
   n_conv_layers:
-    values: [10]
+    values: [3]
 
   apply_dropout_at:
     values: [2]
@@ -34,9 +34,12 @@ parameters:
     values: [2]
   padding:
     values: [1]
+  max_channels:
+    values: [128]
 
   epochs:
-    value: 30
+    value: 5
+
 
 # Uses uv package management
 command:

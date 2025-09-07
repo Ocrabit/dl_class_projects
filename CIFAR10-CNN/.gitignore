@@ -3,7 +3,10 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+
+# UV
 .python-version
+uv.lock
 
 # Virtual environment
 .venv/
