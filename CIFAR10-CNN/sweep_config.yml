@@ -36,6 +36,8 @@ parameters:
     values: [1]
   max_channels:
     values: [128]
+  seed:
+    values: [42]
 
   epochs:
     value: 30

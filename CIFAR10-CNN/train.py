@@ -14,6 +14,7 @@ hyperparameter_defaults = dict(
 
     learning_rate=0.001,
     epochs=2,
+    seed=42,
 
     base_channels=32,
     channel_mult=2,
@@ -95,9 +96,14 @@ def initialize_dataset():
     train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
     test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
 
+    # Create generator with seed for DataLoader
+    generator = torch.Generator()
+    generator.manual_seed(config.seed)
+    
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=config.batch_size,
-                                               shuffle=True)
+                                               shuffle=True,
+                                               generator=generator)
     test_loader = torch.utils.data.DataLoader(test_dataset,
                                               batch_size=config.batch_size,
                                               shuffle=False)
@@ -112,8 +118,15 @@ def initialize_dataset():
 
     return train_dataset, test_dataset, train_loader, test_loader, shape_info
 
+def set_seed(seed):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 def train():
+    set_seed(config.seed)
+    
     # Select Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -132,6 +145,7 @@ def train():
 
     train_losses = []
     train_accuracies = []
+    test_losses = []
     test_accuracies = []
 
     for epoch in range(config.epochs):
@@ -181,11 +195,13 @@ def train():
                 correct_test += pred.eq(target.view_as(pred)).sum().item()
                 total_test += target.size(0)
 
+        test_loss = test_loss / len(test_loader)
         test_acc = 100. * correct_test / total_test
 
         # Store metrics
         train_losses.append(epoch_loss)
         train_accuracies.append(train_acc)
+        test_losses.append(test_loss)
         test_accuracies.append(test_acc)
 
         # Log to wandb
@@ -193,10 +209,11 @@ def train():
             "epoch": epoch + 1,
             "train_loss": epoch_loss,
             "train_accuracy": train_acc,
+            "test_loss": test_loss,
             "test_accuracy": test_acc
         })
 
-        #print(f'Epoch {epoch + 1}: Train Loss: {epoch_loss:.4f}, Train Acc: {train_acc:.2f}%, Test Acc: {test_acc:.2f}%')
+        #print(f'Epoch {epoch + 1}: Train Loss: {epoch_loss:.4f}, Train Acc: {train_acc:.2f}%, Test Loss: {test_loss:.2f}%, Test Acc: {test_acc:.2f}%')
 
     save_path = os.path.join(wandb.run.dir, "model.pt")
     torch.save(model.state_dict(), save_path)
@@ -205,10 +222,6 @@ def train():
 
 
 if __name__ == "__main__":
-    # Set Seeds
-    torch.manual_seed(42)
-    np.random.seed(42)
-
     # Run the train
     start_time = time.time()
     train()
