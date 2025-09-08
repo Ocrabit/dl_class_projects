@@ -70,10 +70,8 @@ class CNN(nn.Module):
         self.dropout1 = nn.Dropout(config.dropout)
         self.global_avg_pool = nn.AdaptiveAvgPool2d(1)  # put near end: yields one value per channel
 
-        # Apply dropout to last set layers
-
         # Final channels after all conv layers
-        final_channels = self.base_channels * (self.channel_mult ** (self.n_conv_layers - 1))
+        final_channels = min(max_channels, self.base_channels * (self.channel_mult ** (self.n_conv_layers - 1)))
         self.fc = nn.Linear(final_channels, shape_info['num_classes'])
 
     def forward(self, x):
