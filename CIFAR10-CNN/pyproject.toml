@@ -10,9 +10,9 @@ dependencies = [
     "wandb>=0.21.3"
 ]
 
+[project.optional-dependencies]
 # CPU build (Mac, CI, or non-CUDA systems)
 cpu = [
   "torch>=2.6,<2.7",
-  "torchvision>=0.21,<0.22",
-  "torchaudio>=2.6,<2.7",
+  "torchvision>=0.21,<0.22"
 ]
