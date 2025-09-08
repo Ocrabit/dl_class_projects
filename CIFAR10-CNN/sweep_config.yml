@@ -5,25 +5,25 @@ metric:
   name: val_loss
 parameters:
   dropout:
-    values: [0.15, 0.2, 0.25, 0.3, 0.4]
+    values: [0.2, 0.3]
 
   batch_size:
-    values: [64, 128, 256]
+    values: [64, 128]
 
   learning_rate:
-    values: [0.0005, 0.001, 0.005]
+    values: [0.0005, 0.001]
 
   base_channels:
-    values: [16, 32, 64]
+    values: [32, 64]
 
   channel_mult:
-    values: [1, 2, 3]
+    values: [2, 3]
 
   n_conv_layers:
-    values: [1, 2, 3, 5]
+    values: [2, 3, 5]
 
   apply_dropout_at:
-    values: [1, 2, 3]
+    values: [2]
 
   activation:
     values: ["ReLU", "GELU", "SiLU"]
@@ -35,7 +35,7 @@ parameters:
   padding:
     values: [1]
   max_channels:
-    values: [ 128 ]
+    values: [128]
 
   epochs:
     value: 30
