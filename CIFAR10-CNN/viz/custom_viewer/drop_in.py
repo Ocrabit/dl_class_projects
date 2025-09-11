@@ -41,7 +41,7 @@ def drop_in_page(df=None):
             st.write(f"Selected {len(selected_columns)} columns")
             
             preview_rows = st.number_input("Preview rows:", min_value=1, max_value=len(filtered_df), value=10, step=1)
-            st.dataframe(filtered_df.head(preview_rows), use_container_width=True)
+            st.dataframe(filtered_df.head(preview_rows), width='stretch')
             st.write(f"Showing {min(preview_rows, len(filtered_df))} of {len(filtered_df)} rows")
             st.write(f"Total: {len(filtered_df)} rows, {len(filtered_df.columns)} columns")
             
