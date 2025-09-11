@@ -95,14 +95,35 @@ def build_advanced_filter(cat_filter_col, selected_vals, hyperparam_filters):
     
     # Add categorical filter
     if cat_filter_col and selected_vals:
-        # Escape string values for query
-        escaped_vals = [f"'{val}'" if isinstance(val, str) else str(val) for val in selected_vals]
-        filter_parts.append(f"{cat_filter_col} in [{', '.join(escaped_vals)}]")
+        conditions = []
+        for val in selected_vals:
+            if isinstance(val, str):
+                escaped_val = val.replace("'", "\\'")  # Escape the damn str
+                conditions.append(f"`{cat_filter_col}` == '{escaped_val}'")
+            elif pd.isna(val):
+                conditions.append(f"`{cat_filter_col}`.isna()")
+            else:
+                conditions.append(f"`{cat_filter_col}` == {val}")
+        
+        if conditions:
+            filter_parts.append(f"({' | '.join(conditions)})")
     
     # Add hyperparameter filters
     for col, vals in hyperparam_filters.items():
         if vals:
-            filter_parts.append(f"{col} in [{', '.join(map(str, vals))}]")
+            # Use same approach for hyperparameter filters
+            conditions = []
+            for val in vals:
+                if isinstance(val, str):
+                    escaped_val = val.replace("'", "\\'")
+                    conditions.append(f"`{col}` == '{escaped_val}'")
+                elif pd.isna(val):
+                    conditions.append(f"`{col}`.isna()")
+                else:
+                    conditions.append(f"`{col}` == {val}")
+            
+            if conditions:
+                filter_parts.append(f"({' | '.join(conditions)})")
     
     return " & ".join(filter_parts) if filter_parts else ""
 
