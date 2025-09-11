@@ -4,6 +4,12 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
+# Default maximum point size for scatter plots
+DEFAULT_MAX_SIZE = 5
+
+# Maximum number of unique values for hyperparameter filtering
+MAX_HYPERPARAM_UNIQUE_VALUES = 15
+
 def clean_label(label):
     """Clean and format labels for plots"""
     return label.replace("_", " ").title()
@@ -53,7 +59,7 @@ def apply_transform(df, col, transform_str):
         if np.any(np.isinf(transformed)):
             transformed = transformed.replace([np.inf, -np.inf], np.nan)
         return transformed
-    except Exception:
+    except (ValueError, TypeError, SyntaxError):
         return df[col].copy()
 
 def validate_filter(df, filter_str):
@@ -80,8 +86,36 @@ def apply_filter(df, filter_str):
             return df.query(filter_str)
         else:
             return df.copy()
-    except Exception:
+    except (ValueError, TypeError, SyntaxError, KeyError):
         return df.copy()
+
+def build_advanced_filter(cat_filter_col, selected_vals, hyperparam_filters):
+    """Build filter expression from advanced filter selections"""
+    filter_parts = []
+    
+    # Add categorical filter
+    if cat_filter_col and selected_vals:
+        # Escape string values for query
+        escaped_vals = [f"'{val}'" if isinstance(val, str) else str(val) for val in selected_vals]
+        filter_parts.append(f"{cat_filter_col} in [{', '.join(escaped_vals)}]")
+    
+    # Add hyperparameter filters
+    for col, vals in hyperparam_filters.items():
+        if vals:
+            filter_parts.append(f"{col} in [{', '.join(map(str, vals))}]")
+    
+    return " & ".join(filter_parts) if filter_parts else ""
+
+def combine_filters(basic_filter, advanced_filter):
+    """Combine basic and advanced filter expressions"""
+    if basic_filter and advanced_filter:
+        return f"({basic_filter}) & ({advanced_filter})"
+    elif basic_filter:
+        return basic_filter
+    elif advanced_filter:
+        return advanced_filter
+    else:
+        return ""
 
 def apply_groupby(df, group_col, agg_method, numeric_cols):
     """Group DataFrame by specified column and aggregate numeric columns"""
@@ -118,7 +152,7 @@ def apply_groupby(df, group_col, agg_method, numeric_cols):
         
         return agg_df
         
-    except Exception:
+    except (ValueError, TypeError, KeyError):
         return df.copy()
 
 def bin_continuous_var(df, col, n_bins):
@@ -156,9 +190,10 @@ def create_base_viewer(df, stage="base"):
     
     st.title("Data Analysis")
     
-    # Auto-detect column types
+    # Auto-detect column types (cache these as they're used multiple times)
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    all_cols = cat_cols + num_cols
     
     # Defaults
     default_x = num_cols[0] if num_cols else cat_cols[0] if cat_cols else df.columns[0]
@@ -209,37 +244,107 @@ def create_base_viewer(df, stage="base"):
             key=f"{stage}_y_transform"
         )
         
-        # Encoding options
-        all_cols = cat_cols + num_cols
+        # Encoding options in expander
         
-        if plot_type != "hexbin":
-            color_by = st.selectbox(
-                "Color By", 
-                [None] + all_cols, 
-                index=([None] + all_cols).index(default_color) if default_color in all_cols else 0,
-                key=f"{stage}_color"
-            )
-        else:
-            color_by = None
+        with st.expander("Visual Specifications", expanded=True):
+            if plot_type != "hexbin":
+                color_by = st.selectbox(
+                    "Color By", 
+                    [None] + all_cols, 
+                    index=([None] + all_cols).index(default_color) if default_color in all_cols else 0,
+                    key=f"{stage}_color"
+                )
+            else:
+                color_by = None
+            
+            if plot_type == "scatter":
+                size_by = st.selectbox(
+                    "Size By", 
+                    [None] + num_cols, 
+                    key=f"{stage}_size"
+                )
+                
+                if size_by:
+                    prev_size_col_key = f"{stage}_prev_size_col"
+                    if prev_size_col_key not in st.session_state:
+                        st.session_state[prev_size_col_key] = size_by
+                    
+                    if st.session_state[prev_size_col_key] != size_by:
+                        st.session_state[f"{stage}_size_scale"] = DEFAULT_MAX_SIZE
+                        st.session_state[prev_size_col_key] = size_by
+                
+                # Size slider always available for scatter plots
+                max_size = st.slider(
+                    "Point Size" if not size_by else "Max Point Size",
+                    min_value=5,
+                    max_value=50,
+                    value=int(st.session_state.get(f"{stage}_size_scale", DEFAULT_MAX_SIZE)),
+                    step=1,
+                    key=f"{stage}_size_scale",
+                    help="Size in pixels for points" if not size_by else "Maximum size in pixels for the largest points"
+                )
+                
+            else:
+                size_by = None
+            
+            # Opacity control
+            if plot_type in ["scatter", "histogram", "boxplot", "violin"]:
+                opacity = st.slider(
+                    "Opacity", 
+                    min_value=0.1, max_value=1.0, value=0.7, step=0.1, 
+                    key=f"{stage}_opacity"
+                )
+            else:
+                opacity = 0.7
         
+        # Trendlines feature in expandable section (only for scatter plots)
         if plot_type == "scatter":
-            size_by = st.selectbox(
-                "Size By", 
-                [None] + num_cols, 
-                key=f"{stage}_size"
-            )
+            with st.expander("Trendlines", expanded=False):
+                show_trendlines = st.checkbox(
+                    "Show Trendlines",
+                    key=f"{stage}_show_trendlines",
+                    help="Connect points into lines based on grouping"
+                )
+                
+                if show_trendlines:
+                    trend_by = st.selectbox(
+                        "Line Groups",
+                        df.columns.tolist(),
+                        key=f"{stage}_trend_by",
+                        help="Connect points with same value in this column"
+                    )
+                    
+                    # Check if trend column is numeric and needs binning
+                    if trend_by and pd.api.types.is_numeric_dtype(df[trend_by]):
+                        trend_bins = st.slider(
+                            "Groups (bins)",
+                            min_value=2,
+                            max_value=20,
+                            value=5,
+                            key=f"{stage}_trend_bins",
+                            help="Number of groups to divide continuous data into"
+                        )
+                    else:
+                        trend_bins = None
+                    
+                    line_opacity = st.slider(
+                        "Line Opacity",
+                        min_value=0.1,
+                        max_value=1.0,
+                        value=0.85,
+                        step=0.1,
+                        key=f"{stage}_line_opacity",
+                        help="Opacity of the trendlines"
+                    )
+                    
+                    show_points_with_lines = st.checkbox(
+                        "Show Points",
+                        value=True,
+                        key=f"{stage}_show_points_with_lines",
+                        help="Show individual points in addition to trendlines"
+                    )
         else:
-            size_by = None
-        
-        # Visual controls
-        if plot_type in ["scatter", "histogram", "boxplot", "violin"]:
-            opacity = st.slider(
-                "Opacity", 
-                min_value=0.1, max_value=1.0, value=0.7, step=0.1, 
-                key=f"{stage}_opacity"
-            )
-        else:
-            opacity = 0.7
+            show_trendlines = False
 
         if plot_type in ["histogram", "hexbin"]:
             n_bins = st.slider(
@@ -272,6 +377,61 @@ def create_base_viewer(df, stage="base"):
             else:
                 st.error(message)
         
+        # Advanced Filter
+        with st.expander("Advanced Filter", expanded=False):
+            filter_mode = st.radio(
+                "Filter Mode",
+                ["Categorical Values", "Hyperparameter Combinations"],
+                key=f"{stage}_filter_mode",
+                help="Choose between categorical filtering or hyperparameter grid filtering"
+            )
+            
+            if filter_mode == "Categorical Values":
+                st.markdown("**Select by Categorical Values**")
+                
+                # Select categorical column to filter
+                cat_filter_col = st.selectbox(
+                    "Filter by Column",
+                    [None] + cat_cols + [col for col in df.columns if col not in num_cols and col not in cat_cols],
+                    key=f"{stage}_cat_filter_col",
+                    help="Select a categorical column to filter by specific values"
+                )
+                
+                if cat_filter_col:
+                    # Get unique values for the selected column
+                    unique_vals = df[cat_filter_col].unique().tolist()
+                    
+                    # Multi-select for values
+                    selected_vals = st.multiselect(
+                        f"Select {cat_filter_col} values",
+                        unique_vals,
+                        key=f"{stage}_cat_filter_vals",
+                        help="Select one or more values to include"
+                    )
+            
+            else:  # Hyperparameter Combinations
+                st.markdown("**Hyperparameter Combinations**")
+                st.markdown("Enter in grid style combinations of what you want to select")
+                
+                # Identify columns that might be hyperparameters (numeric with discrete values)
+                hyperparam_cols = [
+                    col for col in num_cols
+                    if 1 < df[col].nunique() <= MAX_HYPERPARAM_UNIQUE_VALUES
+                ]
+                
+                if hyperparam_cols:
+                    st.markdown("Select specific combinations:")
+                    
+                    for col in hyperparam_cols:  # No limit on number of fields
+                        unique_vals = sorted(df[col].unique().tolist())
+                        st.multiselect(
+                            col,
+                            unique_vals,
+                            key=f"{stage}_hyper_{col}"
+                        )
+                else:
+                    st.info(f"No discrete numeric columns found for hyperparameter filtering (need >1 and ≤{MAX_HYPERPARAM_UNIQUE_VALUES} unique values)")
+        
         # Group By
         st.subheader("Group By")
         group_by_col = st.selectbox(
@@ -296,26 +456,54 @@ def create_base_viewer(df, stage="base"):
             st.error("Y axis required for this plot type")
             return
         
-        # Apply filter
-        filtered_df = apply_filter(df, filter_text)
+        # Build combined filter from basic and advanced filters
+        # Get advanced filter values based on selected mode
+        filter_mode = st.session_state.get(f"{stage}_filter_mode", "Categorical Values")
+        
+        if filter_mode == "Categorical Values":
+            cat_filter_col = st.session_state.get(f"{stage}_cat_filter_col", None)
+            selected_vals = st.session_state.get(f"{stage}_cat_filter_vals", [])
+            hyperparam_filters = {}
+        else:
+            cat_filter_col = None
+            selected_vals = []
+            hyperparam_filters = {}
+            for key in st.session_state:
+                if key.startswith(f"{stage}_hyper_"):
+                    col_name = key.replace(f"{stage}_hyper_", "")
+                    vals = st.session_state[key]
+                    if vals:
+                        hyperparam_filters[col_name] = vals
+        
+        # Build advanced filter expression
+        advanced_filter = build_advanced_filter(cat_filter_col, selected_vals, hyperparam_filters)
+        
+        # Combine with basic filter
+        combined_filter = combine_filters(filter_text, advanced_filter)
+        
+        # Show combined filter if it exists and is non-trivial
+        if combined_filter and advanced_filter:
+            st.info(f"Combined filter: {combined_filter[:100]}{'...' if len(combined_filter) > 100 else ''}")
+        
+        # Apply combined filter
+        filtered_df = apply_filter(df, combined_filter)
         if filtered_df.empty:
             st.warning("No data after filtering")
             return
         
         # Apply group by if selected
         if group_by_col:
-            grouped_df = apply_groupby(filtered_df, group_by_col, agg_method if group_by_col else "mean", num_cols)
-            df_plot = grouped_df.copy()
+            df_plot = apply_groupby(filtered_df, group_by_col, agg_method, num_cols)
             st.info(f"Grouped by {group_by_col}: {len(df_plot)} groups from {len(filtered_df)} records")
         else:
-            df_plot = filtered_df.copy()
+            df_plot = filtered_df
         
         if x_transform:
             try:
                 df_plot['x_transformed'] = apply_transform(df_plot, x_axis, x_transform)
                 x_col = 'x_transformed'
                 x_label = f"{x_transform.replace('x', x_axis)}"
-            except:
+            except (ValueError, TypeError, KeyError, AttributeError):
                 x_col = x_axis
                 x_label = x_axis
                 st.warning(f"X transform failed: {x_transform}")
@@ -328,7 +516,7 @@ def create_base_viewer(df, stage="base"):
                 df_plot['y_transformed'] = apply_transform(df_plot, y_axis, y_transform)
                 y_col = 'y_transformed'
                 y_label = f"{y_transform.replace('x', y_axis)}"
-            except:
+            except (ValueError, TypeError, KeyError, AttributeError):
                 y_col = y_axis
                 y_label = y_axis
                 st.warning(f"Y transform failed: {y_transform}")
@@ -336,16 +524,116 @@ def create_base_viewer(df, stage="base"):
             y_col = y_axis
             y_label = y_axis
         
+        # Use size_by directly without any transformation
+        size_col = size_by
+        
         # Create plot
         fig = None
         
         if plot_type == "scatter":
-            fig = px.scatter(
-                df_plot, x=x_col, y=y_col,
-                color=color_by, size=size_by,
-                opacity=opacity,
-                title=f"{clean_label(y_label) if y_label else 'Data'} vs {clean_label(x_label)}"
-            )
+            # Handle trendlines if enabled
+            if show_trendlines and trend_by:
+                # Prepare trendline groups
+                line_group_col = trend_by
+                
+                # If numeric column, bin it for grouping
+                if pd.api.types.is_numeric_dtype(df_plot[trend_by]) and trend_bins:
+                    df_plot['trend_group'] = bin_continuous_var(df_plot, trend_by, trend_bins)
+                    line_group_col = 'trend_group'
+                
+                # Sort data by x-axis for proper line connections
+                df_plot = df_plot.sort_values([line_group_col, x_col])
+                
+                # First add trendlines (so they appear behind points)
+                fig = go.Figure()
+                
+                # Add trendlines by grouping data and adding line traces
+                for group_name in df_plot[line_group_col].unique():
+                    group_data = df_plot[df_plot[line_group_col] == group_name].sort_values(x_col)
+                    
+                    # Add line trace for this group
+                    fig.add_trace(go.Scatter(
+                        x=group_data[x_col],
+                        y=group_data[y_col],
+                        mode='lines',
+                        name=f'Trend: {group_name}',
+                        line=dict(width=2),
+                        showlegend=True,
+                        opacity=line_opacity
+                    ))
+                
+                # Conditionally add scatter points on top (if enabled)
+                if show_points_with_lines:
+                    scatter_fig = px.scatter(
+                        df_plot, x=x_col, y=y_col,
+                        color=color_by, 
+                        size=size_col,
+                        size_max=max_size if size_col else None,
+                        opacity=opacity,
+                        title=f"{clean_label(y_label) if y_label else 'Data'} vs {clean_label(x_label)} (with trendlines)"
+                    )
+                    
+                    # Apply uniform size when no size column is selected
+                    if not size_col:
+                        scatter_fig.update_traces(marker=dict(size=max_size))
+                    
+                    # Add scatter traces to the figure (points on top)
+                    for trace in scatter_fig.data:
+                        # Make points more prominent with border
+                        trace.update(
+                            marker=dict(
+                                line=dict(width=1, color='white'),  # White border around points
+                                opacity=opacity
+                            )
+                        )
+                        fig.add_trace(trace)
+                    
+                    # Update layout from scatter figure
+                    fig.update_layout(
+                        title=scatter_fig.layout.title,
+                        xaxis=scatter_fig.layout.xaxis,
+                        yaxis=scatter_fig.layout.yaxis,
+                        # Position legend to avoid overlap with colorbar
+                        legend=dict(
+                            x=1.02,
+                            y=1,
+                            xanchor='left',
+                            yanchor='top'
+                        )
+                    )
+                    
+                    # If there's a colorbar from continuous color, position it properly
+                    if color_by and pd.api.types.is_numeric_dtype(df_plot[color_by]):
+                        fig.update_layout(
+                            coloraxis_colorbar=dict(
+                                x=1.02,
+                                y=0.5,
+                                xanchor='left',
+                                yanchor='middle',
+                                len=0.5
+                            )
+                        )
+                else:
+                    # Just lines, no points - set basic title and axes
+                    fig.update_layout(
+                        title=f"{clean_label(y_label) if y_label else 'Data'} vs {clean_label(x_label)} (trendlines only)",
+                        xaxis_title=clean_label(x_label),
+                        yaxis_title=clean_label(y_label) if y_label else ""
+                    )
+            else:
+                # Regular scatter plot
+                fig = px.scatter(
+                    df_plot, x=x_col, y=y_col,
+                    color=color_by, 
+                    size=size_col,
+                    size_max=max_size if size_col else None,
+                    opacity=opacity,
+                    title=f"{clean_label(y_label) if y_label else 'Data'} vs {clean_label(x_label)}"
+                )
+                
+                # Apply uniform size when no size column is selected
+                if not size_col:
+                    fig.update_traces(marker=dict(size=max_size))
         elif plot_type == "histogram":
             target_col = y_col if y_col else x_col
             fig = px.histogram(
@@ -393,13 +681,13 @@ def create_base_viewer(df, stage="base"):
                 template='plotly_white'
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         
         # Statistics
         st.subheader("Statistics")
         
         # Use the appropriate dataframe for statistics
-        stats_df = df_plot if group_by_col else filtered_df
+        stats_df = df_plot
         
         stats_html = f"<b>Records displayed:</b> {len(stats_df)}<br>"
         if group_by_col:
@@ -407,9 +695,11 @@ def create_base_viewer(df, stage="base"):
             stats_html += f"<b>Aggregation:</b> {agg_method}<br>"
         
         if x_axis in stats_df.columns and pd.api.types.is_numeric_dtype(stats_df[x_axis]):
-            stats_html += f"<b>X range:</b> [{stats_df[x_axis].min():.3g}, {stats_df[x_axis].max():.3g}]<br>"
+            x_min, x_max = stats_df[x_axis].min(), stats_df[x_axis].max()
+            stats_html += f"<b>X range:</b> [{x_min:.3g}, {x_max:.3g}]<br>"
         if y_axis and y_axis in stats_df.columns and pd.api.types.is_numeric_dtype(stats_df[y_axis]):
-            stats_html += f"<b>Y range:</b> [{stats_df[y_axis].min():.3g}, {stats_df[y_axis].max():.3g}]<br>"
-            stats_html += f"<b>Y mean:</b> {stats_df[y_axis].mean():.4f}<br>"
+            y_min, y_max, y_mean = stats_df[y_axis].min(), stats_df[y_axis].max(), stats_df[y_axis].mean()
+            stats_html += f"<b>Y range:</b> [{y_min:.3g}, {y_max:.3g}]<br>"
+            stats_html += f"<b>Y mean:</b> {y_mean:.4f}<br>"
         
         st.markdown(stats_html, unsafe_allow_html=True)
