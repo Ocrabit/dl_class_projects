@@ -83,6 +83,44 @@ def apply_filter(df, filter_str):
     except Exception:
         return df.copy()
 
+def apply_groupby(df, group_col, agg_method, numeric_cols):
+    """Group DataFrame by specified column and aggregate numeric columns"""
+    if not group_col or group_col not in df.columns:
+        return df.copy()
+    
+    try:
+        # Group by the specified column
+        grouped = df.groupby(group_col)
+        
+        # Apply aggregation to numeric columns only
+        if agg_method == "mean":
+            agg_df = grouped[numeric_cols].mean().reset_index()
+        elif agg_method == "median":
+            agg_df = grouped[numeric_cols].median().reset_index()
+        elif agg_method == "sum":
+            agg_df = grouped[numeric_cols].sum().reset_index()
+        elif agg_method == "count":
+            agg_df = grouped[numeric_cols].count().reset_index()
+        elif agg_method == "min":
+            agg_df = grouped[numeric_cols].min().reset_index()
+        elif agg_method == "max":
+            agg_df = grouped[numeric_cols].max().reset_index()
+        else:  # default to mean
+            agg_df = grouped[numeric_cols].mean().reset_index()
+        
+        # Add categorical columns back (take first value from each group)
+        cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        cat_cols = [col for col in cat_cols if col != group_col]  # exclude group column
+        
+        if cat_cols:
+            cat_data = grouped[cat_cols].first().reset_index()
+            agg_df = agg_df.merge(cat_data, on=group_col, how='left')
+        
+        return agg_df
+        
+    except Exception:
+        return df.copy()
+
 def bin_continuous_var(df, col, n_bins):
     """Bin continuous variable for box/violin plots"""
     clean_data = df[col].dropna()
@@ -111,6 +149,9 @@ def create_base_viewer(df, stage="base"):
     
     if st.button("← Back to Data Upload", type="secondary", key=f"{stage}_back"):
         st.session_state.current_page = 'upload'
+        # Clear selected columns to avoid mismatch with new data
+        if 'selected_columns' in st.session_state:
+            del st.session_state.selected_columns
         st.rerun()
     
     st.title("Data Analysis")
@@ -230,6 +271,23 @@ def create_base_viewer(df, stage="base"):
                 st.success(message)
             else:
                 st.error(message)
+        
+        # Group By
+        st.subheader("Group By")
+        group_by_col = st.selectbox(
+            "Group By Column",
+            [None] + df.columns.tolist(),
+            key=f"{stage}_group_by",
+            help="Group data by this column and aggregate"
+        )
+        
+        if group_by_col:
+            agg_method = st.selectbox(
+                "Aggregation Method",
+                ["mean", "median", "sum", "count", "min", "max"],
+                key=f"{stage}_agg_method",
+                help="How to aggregate numeric values within each group"
+            )
     
     with col2:
         st.subheader("Visualization")
@@ -244,12 +302,17 @@ def create_base_viewer(df, stage="base"):
             st.warning("No data after filtering")
             return
         
-        # Apply transforms
-        df_plot = filtered_df.copy()
+        # Apply group by if selected
+        if group_by_col:
+            grouped_df = apply_groupby(filtered_df, group_by_col, agg_method if group_by_col else "mean", num_cols)
+            df_plot = grouped_df.copy()
+            st.info(f"Grouped by {group_by_col}: {len(df_plot)} groups from {len(filtered_df)} records")
+        else:
+            df_plot = filtered_df.copy()
         
         if x_transform:
             try:
-                df_plot['x_transformed'] = apply_transform(filtered_df, x_axis, x_transform)
+                df_plot['x_transformed'] = apply_transform(df_plot, x_axis, x_transform)
                 x_col = 'x_transformed'
                 x_label = f"{x_transform.replace('x', x_axis)}"
             except:
@@ -262,7 +325,7 @@ def create_base_viewer(df, stage="base"):
         
         if y_transform and y_axis:
             try:
-                df_plot['y_transformed'] = apply_transform(filtered_df, y_axis, y_transform)
+                df_plot['y_transformed'] = apply_transform(df_plot, y_axis, y_transform)
                 y_col = 'y_transformed'
                 y_label = f"{y_transform.replace('x', y_axis)}"
             except:
@@ -302,6 +365,7 @@ def create_base_viewer(df, stage="base"):
                 df_plot, x=x_col_for_plot, y=y_col, color=color_by,
                 title=f"{clean_label(y_label)} by {clean_label(x_label)}"
             )
+            fig.update_traces(boxmean=True)
         elif plot_type == "violin":
             if pd.api.types.is_numeric_dtype(df_plot[x_col]):
                 df_plot['x_binned'] = bin_continuous_var(df_plot, x_col, n_bins)
@@ -333,12 +397,19 @@ def create_base_viewer(df, stage="base"):
         
         # Statistics
         st.subheader("Statistics")
-        stats_html = f"<b>Records displayed:</b> {len(filtered_df)}<br>"
         
-        if pd.api.types.is_numeric_dtype(filtered_df[x_axis]):
-            stats_html += f"<b>X range:</b> [{filtered_df[x_axis].min():.3g}, {filtered_df[x_axis].max():.3g}]<br>"
-        if y_axis and pd.api.types.is_numeric_dtype(filtered_df[y_axis]):
-            stats_html += f"<b>Y range:</b> [{filtered_df[y_axis].min():.3g}, {filtered_df[y_axis].max():.3g}]<br>"
-            stats_html += f"<b>Y mean:</b> {filtered_df[y_axis].mean():.4f}<br>"
+        # Use the appropriate dataframe for statistics
+        stats_df = df_plot if group_by_col else filtered_df
+        
+        stats_html = f"<b>Records displayed:</b> {len(stats_df)}<br>"
+        if group_by_col:
+            stats_html += f"<b>Groups:</b> {len(stats_df)} (from {len(filtered_df)} original records)<br>"
+            stats_html += f"<b>Aggregation:</b> {agg_method}<br>"
+        
+        if x_axis in stats_df.columns and pd.api.types.is_numeric_dtype(stats_df[x_axis]):
+            stats_html += f"<b>X range:</b> [{stats_df[x_axis].min():.3g}, {stats_df[x_axis].max():.3g}]<br>"
+        if y_axis and y_axis in stats_df.columns and pd.api.types.is_numeric_dtype(stats_df[y_axis]):
+            stats_html += f"<b>Y range:</b> [{stats_df[y_axis].min():.3g}, {stats_df[y_axis].max():.3g}]<br>"
+            stats_html += f"<b>Y mean:</b> {stats_df[y_axis].mean():.4f}<br>"
         
         st.markdown(stats_html, unsafe_allow_html=True)
