@@ -15,6 +15,94 @@ def get_sample_data_files():
         return [(f.name, f) for f in csv_files]
     return []
 
+@st.dialog("Sample Data Information")
+def show_help_dialog():
+    st.markdown("## WandB Sweep Experiment Data")
+    
+    st.markdown("""
+    This data was collected by running **288 hyperparameter sweeps** using Weights & Biases (WandB) 
+    across **30 epochs** each.
+    """)
+    
+    st.markdown("### Dataset Descriptions:")
+    
+    with st.expander("**HistoryOfSweep.csv**", expanded=True):
+        st.markdown("""
+        - Contains **all epoch states** for each run (epochs 1-30)
+        - Includes metrics and values tracked throughout training
+        - Larger dataset with detailed training progression
+        - Useful for analyzing learning curves and training dynamics
+        """)
+    
+    with st.expander("**SummaryOfSweep.csv**", expanded=True):
+        st.markdown("""
+        - Contains **final results** from epoch 30 only
+        - Includes configuration values used for each run
+        - Final metrics and summary statistics
+        - Useful for hyperparameter optimization analysis
+        """)
+    
+    st.markdown("### Experiment Details:")
+    st.markdown("""
+    - **Total Runs:** 288
+    - **Epochs per Run:** 30
+    - **Data Source:** WandB sweep experiments
+    """)
+    
+    st.markdown("### Sweep Configuration:")
+    st.code("""program: train.py
+method: grid
+metric:
+  goal: minimize
+  name: val_loss
+parameters:
+  dropout:
+    values: [0.2, 0.3]
+
+  batch_size:
+    values: [64, 128]
+
+  learning_rate:
+    values: [0.0005, 0.001]
+
+  base_channels:
+    values: [32, 64]
+
+  channel_mult:
+    values: [2, 3]
+
+  n_conv_layers:
+    values: [2, 3, 5]
+
+  apply_dropout_at:
+    values: [2]
+
+  activation:
+    values: ["ReLU", "GELU", "SiLU"]
+
+  kernel_size:
+    values: [3]
+  stride:
+    values: [2]
+  padding:
+    values: [1]
+  max_channels:
+    values: [128]
+  seed:
+    values: [42]
+
+  epochs:
+    value: 30""", language="yaml")
+    
+    st.markdown("---")
+    st.markdown("### Source Code:")
+    st.markdown("See the train.py file and full project code at:")
+    st.markdown("[https://github.com/Ocrabit/dl_class_projects/tree/main/CIFAR10-CNN](https://github.com/Ocrabit/dl_class_projects/tree/main/CIFAR10-CNN)")
+    
+    if st.button("Close", type="primary"):
+        st.session_state.show_data_help = False
+        st.rerun()
+
 def drop_in_page(df=None):
     st.set_page_config(page_title="data drop-in", layout="wide")
     st.title("data drop-in")
@@ -35,7 +123,13 @@ def drop_in_page(df=None):
                     return None
         
         with col2:
-            st.subheader("Choose from Sample Data")
+            col2_1, col2_2 = st.columns([10, 1])
+            with col2_1:
+                st.subheader("Choose from Sample Data")
+            with col2_2:
+                if st.button("?", key="help_button", help="Learn about the sample datasets", width=100):
+                    show_help_dialog()
+            
             sample_files = get_sample_data_files()
             
             if sample_files:
@@ -44,7 +138,7 @@ def drop_in_page(df=None):
                     "Select sample dataset:",
                     [None] + sample_names,
                     format_func=lambda x: "Choose a sample..." if x is None else x,
-                    key="sample_data_selector"
+                    key="sample_data_selector",
                 )
                 
                 if selected_sample:
@@ -62,13 +156,12 @@ def drop_in_page(df=None):
         
         if df is None:
             st.info("Upload a CSV file or choose sample data to start")
-            return None
     else:
         st.success(f"Using existing data: {len(df)} rows, {len(df.columns)} columns")
         if st.button("Reupload", type="secondary"):
             st.session_state.stored_df = None
             st.rerun()
-    
+
     if df is not None:
         default_selection = st.session_state.get('selected_columns', df.columns.tolist())
         
@@ -94,6 +187,33 @@ def drop_in_page(df=None):
         else:
             st.warning("Select at least one column")
             return None
+
+    st.markdown("""
+        <style>
+            .github-link {
+                font-family: open-sans;
+                font-size: 25px;
+                font-weight: 500;
+                background-color: #eae3de;
+                padding: 10px 20px;
+                border-radius: 20px;
+                text-decoration: none;
+                display: inline-block;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            .github-link:hover {
+                transform: scale(1.05);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+                background-color: #94484d;
+            }
+        </style>
+        <div style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); text-align: center;">
+            <a href="https://github.com/Ocrabit/dl_class_projects/tree/main/CIFAR10-CNN" target="_blank" class="github-link">
+                View project source code on GitHub
+            </a>
+        </div>
+    """, unsafe_allow_html=True)
     
     return None
 

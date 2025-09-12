@@ -878,3 +878,7 @@ def create_base_viewer(df, stage="base"):
             stats_html += f"<b>Y mean:</b> {y_mean:.4f}<br>"
         
         st.markdown(stats_html, unsafe_allow_html=True)
+        
+        # Add GitHub link at the bottom
+        st.markdown("---")
+        st.markdown("[View project source code on GitHub](https://github.com/Ocrabit/dl_class_projects/tree/main/CIFAR10-CNN)")
