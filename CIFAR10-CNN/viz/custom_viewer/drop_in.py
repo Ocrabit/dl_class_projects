@@ -123,10 +123,38 @@ def drop_in_page(df=None):
                     return None
         
         with col2:
-            col2_1, col2_2 = st.columns([10, 1])
+            col2_1, col2_2, col2_3 = st.columns([10, 2, 1])
             with col2_1:
                 st.subheader("Choose from Sample Data")
             with col2_2:
+                st.markdown("""
+                    <style>
+                        .bounce-text {
+                            animation: bounce-glow 4s ease-in-out;
+                            display: inline-block;
+                            font-size: 20px;
+                            font-weight: bold;
+                        }
+                        
+                        @keyframes bounce-glow {
+                            0% { transform: translateY(0px); text-shadow: none; }
+                            8% { transform: translateY(-15px); text-shadow: 0 0 12px rgba(255, 215, 0, 0.9); }
+                            16% { transform: translateY(0px); text-shadow: 0 0 6px rgba(255, 215, 0, 0.5); }
+                            24% { transform: translateY(-12px); text-shadow: 0 0 10px rgba(255, 215, 0, 0.8); }
+                            32% { transform: translateY(0px); text-shadow: 0 0 4px rgba(255, 215, 0, 0.3); }
+                            40% { transform: translateY(-8px); text-shadow: 0 0 8px rgba(255, 215, 0, 0.6); }
+                            48% { transform: translateY(0px); text-shadow: 0 0 3px rgba(255, 215, 0, 0.2); }
+                            56% { transform: translateY(-5px); text-shadow: 0 0 6px rgba(255, 215, 0, 0.4); }
+                            64% { transform: translateY(0px); text-shadow: 0 0 2px rgba(255, 215, 0, 0.1); }
+                            72% { transform: translateY(-3px); text-shadow: 0 0 4px rgba(255, 215, 0, 0.3); }
+                            80% { transform: translateY(0px); text-shadow: 0 0 1px rgba(255, 215, 0, 0.1); }
+                            88% { transform: translateY(-1px); text-shadow: 0 0 2px rgba(255, 215, 0, 0.2); }
+                            100% { transform: translateY(0px); text-shadow: none; }
+                        }
+                    </style>
+                    <span class="bounce-text">Click me →</span>
+                """, unsafe_allow_html=True)
+            with col2_3:
                 if st.button("?", key="help_button", help="Learn about the sample datasets", width=100):
                     show_help_dialog()
             
