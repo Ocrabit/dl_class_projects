@@ -20,11 +20,16 @@ def show_help_dialog():
     st.markdown("## WandB Sweep Experiment Data")
     
     st.markdown("""
-    This data was collected by running **288 hyperparameter sweeps** using Weights & Biases (WandB) 
-    across **30 epochs** each.
+    This data was collected by running **288 hyperparameter combinations** via sweeps with Weights & Biases (WandB) 
+    across **30 epochs** each combination.
     """)
     
     st.markdown("### Dataset Descriptions:")
+    
+    st.markdown("""
+    The CNN model was trained on **CIFAR10** - a dataset of 60,000 32x32 color images in 10 classes.
+    Check out the [GitHub repo](https://github.com/Ocrabit/dl_class_projects/tree/main/CIFAR10-CNN) for model architecture details.
+    """)
     
     with st.expander("**HistoryOfSweep.csv**", expanded=True):
         st.markdown("""
@@ -46,7 +51,13 @@ def show_help_dialog():
     st.markdown("""
     - **Total Runs:** 288
     - **Epochs per Run:** 30
-    - **Data Source:** WandB sweep experiments
+    - **Data Source:** CIFAR10
+    """)
+
+    st.markdown("""
+    ### Creating a csv from your Sweep
+    
+    You can create a CSV from your sweep run by following this short [Jupyter notebook](https://github.com/Ocrabit/dl_class_projects/blob/main/CIFAR10-CNN/viz/sweep_collection_notebook.ipynb).
     """)
     
     st.markdown("### Sweep Configuration:")
@@ -93,7 +104,7 @@ parameters:
 
   epochs:
     value: 30""", language="yaml")
-    
+
     st.markdown("---")
     st.markdown("### Source Code:")
     st.markdown("See the train.py file and full project code at:")
