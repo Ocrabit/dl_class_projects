@@ -37,11 +37,16 @@ def validate_transform(df, col, transform_str):
     if not transform_str or not transform_str.strip():
         return True, ""
     
+    if not pd.api.types.is_numeric_dtype(df[col]):
+        return False, "Column must be numeric for transforms"
+    
     try:
         sample = df[col].head(10).copy()
+        # Use both x and y as variable names so transforms work for both axes
         x = sample
+        y = sample
         allowed_names = {
-            "x": x, "np": np, "pd": pd,
+            "x": x, "y": y, "np": np, "pd": pd,
             "log": np.log, "log10": np.log10, "log2": np.log2,
             "exp": np.exp, "sqrt": np.sqrt, "abs": np.abs,
             "sin": np.sin, "cos": np.cos, "tan": np.tan
@@ -56,7 +61,7 @@ def validate_transform(df, col, transform_str):
         if np.any(np.isinf(result)):
             return False, "Results in infinite values"
         
-        return True, "Valid"
+        return True, "✓ Valid"
     except Exception as e:
         return False, str(e)[:40]
 
@@ -66,9 +71,11 @@ def apply_transform(df, col, transform_str):
         return df[col].copy()
     
     try:
+        # Use both x and y as variable names so transforms work for both axes
         x = df[col].copy()
+        y = df[col].copy()
         allowed_names = {
-            "x": x, "np": np, "pd": pd,
+            "x": x, "y": y, "np": np, "pd": pd,
             "log": np.log, "log10": np.log10, "log2": np.log2,
             "exp": np.exp, "sqrt": np.sqrt, "abs": np.abs,
             "sin": np.sin, "cos": np.cos, "tan": np.tan
@@ -231,39 +238,227 @@ def bin_continuous_var(df, col, n_bins):
     
     return binned
 
-def create_base_viewer(df, stage="base"):
-    """Create a generic data visualization dashboard"""
+def select_fun_initial_columns(df, num_cols, cat_cols):
+    """Select fun initial cols for x and y axes
+    
+    Returns:
+        tuple: (default_x, default_y) column names
+    """
+    # For X-axis: prefer few discrete values
+    default_x = None
+    
+    # First choice: categorical columns
+    choose_cat_or_disc = np.random.choice([0, 1, 1, 1, 1])  # Meh I like non cat more
+    if choose_cat_or_disc:
+        # print("Choosing a categorical column for X")
+        index_greater_than_3_cols = [
+            i
+            for i, col in enumerate(cat_cols)
+            if (
+                    df[col].nunique() > 3
+                    and (
+                            not pd.api.types.is_string_dtype(df[col])
+                            or df[col].str.len().max() < 20
+                    )
+            )
+        ]
+
+        if not index_greater_than_3_cols:
+            index_greater_than_3_cols = [0]
+        
+        default_x = cat_cols[np.random.choice(index_greater_than_3_cols)]
+    else:  # Okay discrete we go
+        # print("Choosing a discrete column for X")
+        if num_cols:
+            num_cols_filtered = [col for col in num_cols if df[col].nunique(dropna=True) > 3]
+
+            if num_cols_filtered:
+                default_x = np.random.choice(num_cols_filtered)
+            else:
+                default_x = num_cols[0]
+        else:
+            default_x = df.columns[0] if len(df.columns) > 0 else None
+    
+    # For Y-axis: prefer continuous variables (high cardinality numeric)
+    default_y = num_cols[0] if num_cols else (cat_cols[0] if cat_cols else None)
+
+    if num_cols:
+        # Sort numeric columns by number of unique values (descending for high cardinality)
+        num_cols_by_cardinality = sorted(
+            num_cols,
+            key=lambda col: df[col].nunique(dropna=True),
+            reverse=True
+        )
+
+        # Pick randomly from the top-k highest cardinality numeric columns
+        k = min(3, len(num_cols_by_cardinality))  # top 3 or fewer
+        candidates = num_cols_by_cardinality[:k]
+
+        # If x already taken, filter it out (unless it’s the only option)
+        candidates = [col for col in candidates if col != default_x] or candidates
+
+        default_y = np.random.choice(candidates)
+    
+    return default_x, default_y
+
+def create_base_viewer(df, stage="base", use_fun_defaults=False):
+    """Create a generic data visualization dashboard
+    
+    Args:
+        df: DataFrame to visualize
+        stage: Unique identifier for the viewer instance
+        use_fun_defaults: Whether to use random fun initial column selection
+    """
     if df is None or df.empty:
         st.warning("No data available")
         return
     
-    if st.button("← Back to Data Upload", type="secondary", key=f"{stage}_back"):
-        st.session_state.current_page = 'upload'
-        # Clear selected columns to avoid mismatch with new data
-        if 'selected_columns' in st.session_state:
-            del st.session_state.selected_columns
-        st.rerun()
+    col_back, col_reset, col_spacer, col_fun = st.columns([2, 2, 10, 1])
+    with col_back:
+        if st.button("← Back to Data Upload", type="secondary", key=f"{stage}_back"):
+            st.session_state.current_page = 'upload'
+            if 'selected_columns' in st.session_state:
+                del st.session_state.selected_columns
+            st.rerun()
+    
+    with col_reset:
+        if st.button("Reset Fields", type="secondary", key=f"{stage}_reset"):
+            viewer_key = f"{stage}_viewer_selections"
+            if viewer_key in st.session_state:
+                del st.session_state[viewer_key]
+            keys_to_clear = [key for key in st.session_state.keys() if key.startswith(f"{stage}_")]
+            for key in keys_to_clear:
+                del st.session_state[key]
+            st.rerun()
+
+    with col_fun:
+        if st.button("🎲!", type="secondary", key=f"{stage}_fun", width='stretch'):
+            viewer_key = f"{stage}_viewer_selections"
+            if viewer_key in st.session_state:
+                del st.session_state[viewer_key]
+            st.session_state[f"{stage}_roll_fun"] = True
+            st.rerun()
 
     # Auto-detect column types (cache these as they're used multiple times)
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
     all_cols = cat_cols + num_cols
     
-    # Defaults
-    default_x = num_cols[0] if num_cols else cat_cols[0] if cat_cols else df.columns[0]
-    default_y = num_cols[1] if len(num_cols) > 1 else num_cols[0] if num_cols else None
-    default_color = cat_cols[0] if cat_cols else None
+    # Initialize viewer selections in session state if not present
+    viewer_key = f"{stage}_viewer_selections"
     
+    # Check for fun roll
+    roll_fun_key = f"{stage}_roll_fun"
+    should_use_fun = use_fun_defaults or st.session_state.get(roll_fun_key, False)
+    
+    # Clean it
+    if roll_fun_key in st.session_state:
+        del st.session_state[roll_fun_key]
+    
+    if viewer_key not in st.session_state:
+        if should_use_fun:
+            default_x, default_y = select_fun_initial_columns(df, num_cols, cat_cols)
+        else:
+            default_x = num_cols[0] if num_cols else cat_cols[0] if cat_cols else df.columns[0]
+            default_y = num_cols[1] if len(num_cols) > 1 else num_cols[0] if num_cols else None
+        default_color = cat_cols[0] if cat_cols else None
+        
+        st.session_state[viewer_key] = {
+            'x_axis': default_x,
+            'y_axis': default_y,
+            'color_by': default_color,
+            'size_by': None,
+            'plot_type': 'scatter',
+            'opacity': 0.7,
+            'n_bins': 10,
+            'group_by': None,
+            'agg_method': 'mean',
+            'filter_text': '',
+            'x_transform': '',
+            'y_transform': '',
+            'filter_mode': 'Categorical Values',
+            'cat_filter_col': None,
+            'cat_filter_vals': [],
+            'show_trendlines': False,
+            'trend_by': None,
+            'trend_bins': 5,
+            'line_opacity': 0.85,
+            'show_points_with_lines': True,
+            'hover_fields': [],
+            'size_scale': DEFAULT_MAX_SIZE,
+            'hide_single_values': True,
+            'hyper_selections': []
+        }
+    
+    # Get stored selections
+    selections = st.session_state[viewer_key]
+    
+    # Function to update stored selections when widgets change
+    def update_selections():
+        # Only update stored values FROM widget session state (one-way sync)
+        if f"{stage}_plot_type" in st.session_state:
+            selections['plot_type'] = st.session_state[f"{stage}_plot_type"]
+        if f"{stage}_x_axis" in st.session_state:
+            selections['x_axis'] = st.session_state[f"{stage}_x_axis"]
+        if f"{stage}_y_axis" in st.session_state:
+            selections['y_axis'] = st.session_state[f"{stage}_y_axis"]
+        if f"{stage}_color" in st.session_state:
+            selections['color_by'] = st.session_state[f"{stage}_color"]
+        if f"{stage}_size" in st.session_state:
+            selections['size_by'] = st.session_state[f"{stage}_size"]
+        if f"{stage}_opacity" in st.session_state:
+            selections['opacity'] = st.session_state[f"{stage}_opacity"]
+        if f"{stage}_bins" in st.session_state:
+            selections['n_bins'] = st.session_state[f"{stage}_bins"]
+        if f"{stage}_group_by" in st.session_state:
+            selections['group_by'] = st.session_state[f"{stage}_group_by"]
+        if f"{stage}_agg_method" in st.session_state:
+            selections['agg_method'] = st.session_state[f"{stage}_agg_method"]
+        if f"{stage}_filter" in st.session_state:
+            selections['filter_text'] = st.session_state[f"{stage}_filter"]
+        if f"{stage}_x_transform" in st.session_state:
+            selections['x_transform'] = st.session_state[f"{stage}_x_transform"]
+        if f"{stage}_y_transform" in st.session_state:
+            selections['y_transform'] = st.session_state[f"{stage}_y_transform"]
+        if f"{stage}_filter_mode" in st.session_state:
+            selections['filter_mode'] = st.session_state[f"{stage}_filter_mode"]
+        if f"{stage}_cat_filter_col" in st.session_state:
+            selections['cat_filter_col'] = st.session_state[f"{stage}_cat_filter_col"]
+        if f"{stage}_cat_filter_vals" in st.session_state:
+            selections['cat_filter_vals'] = st.session_state[f"{stage}_cat_filter_vals"]
+        if f"{stage}_show_trendlines" in st.session_state:
+            selections['show_trendlines'] = st.session_state[f"{stage}_show_trendlines"]
+        if f"{stage}_trend_by" in st.session_state:
+            selections['trend_by'] = st.session_state[f"{stage}_trend_by"]
+        if f"{stage}_trend_bins" in st.session_state:
+            selections['trend_bins'] = st.session_state[f"{stage}_trend_bins"]
+        if f"{stage}_line_opacity" in st.session_state:
+            selections['line_opacity'] = st.session_state[f"{stage}_line_opacity"]
+        if f"{stage}_show_points_with_lines" in st.session_state:
+            selections['show_points_with_lines'] = st.session_state[f"{stage}_show_points_with_lines"]
+        if f"{stage}_hover_fields" in st.session_state:
+            selections['hover_fields'] = st.session_state[f"{stage}_hover_fields"]
+        if f"{stage}_size_scale" in st.session_state:
+            selections['size_scale'] = st.session_state[f"{stage}_size_scale"]
+        if f"{stage}_hide_single_values" in st.session_state:
+            selections['hide_single_values'] = st.session_state[f"{stage}_hide_single_values"]
+        if f"{stage}_hyper_selections" in st.session_state:
+            selections['hyper_selections'] = st.session_state[f"{stage}_hyper_selections"]
+    
+    update_selections()
     col1, col2 = st.columns([1, 4], gap="large")
     
     with col1:
         with st.container(height="stretch"):
             st.subheader("Controls")
-
+            
+            plot_options = ["scatter", "histogram", "boxplot", "violin", "hexbin"]
+            
             # Plot type
             plot_type = st.selectbox(
                 "Plot Type",
-                ["scatter", "histogram", "boxplot", "violin", "hexbin"],
+                plot_options,
+                index=plot_options.index(selections.get('plot_type', 'scatter')),
                 key=f"{stage}_plot_type"
             )
 
@@ -271,7 +466,7 @@ def create_base_viewer(df, stage="base"):
             x_axis = st.selectbox(
                 "X Axis",
                 df.columns.tolist(),
-                index=df.columns.tolist().index(default_x) if default_x in df.columns else 0,
+                index=df.columns.tolist().index(selections['x_axis']) if selections['x_axis'] in df.columns else 0,
                 key=f"{stage}_x_axis"
             )
 
@@ -279,7 +474,7 @@ def create_base_viewer(df, stage="base"):
                 y_axis = st.selectbox(
                     "Y Axis",
                     num_cols,
-                    index=num_cols.index(default_y) if default_y in num_cols else 0,
+                    index=num_cols.index(selections['y_axis']) if selections['y_axis'] in num_cols else 0,
                     key=f"{stage}_y_axis"
                 )
             else:
@@ -289,14 +484,37 @@ def create_base_viewer(df, stage="base"):
             # Transform inputs
             x_transform = st.text_input(
                 "X Transform",
+                value=selections.get('x_transform', ''),
                 placeholder="np.log10(x) or log(x)",
                 key=f"{stage}_x_transform"
             )
             y_transform = st.text_input(
                 "Y Transform",
+                value=selections.get('y_transform', ''),
                 placeholder="y*100 or log(y)",
                 key=f"{stage}_y_transform"
             )
+
+            # Validate transforms and clear malformed ones from session state
+            if x_transform and x_axis:
+                is_valid, message = validate_transform(df, x_axis, x_transform)
+                if is_valid:
+                    st.success(f"X: {message}")
+                else:
+                    st.error(f"X: {message}")
+                    # Clear malformed transform from session state
+                    if f"{stage}_x_transform" in st.session_state:
+                        del st.session_state[f"{stage}_x_transform"]
+            
+            if y_transform and y_axis:
+                is_valid, message = validate_transform(df, y_axis, y_transform)
+                if is_valid:
+                    st.success(f"Y: {message}")
+                else:
+                    st.error(f"Y: {message}")
+                    # Clear malformed transform from session state
+                    if f"{stage}_y_transform" in st.session_state:
+                        del st.session_state[f"{stage}_y_transform"]
 
             # Encoding options in expander
 
@@ -305,7 +523,7 @@ def create_base_viewer(df, stage="base"):
                     color_by = st.selectbox(
                         "Color By",
                         [None] + all_cols,
-                        index=([None] + all_cols).index(default_color) if default_color in all_cols else 0,
+                        index=([None] + all_cols).index(selections['color_by']) if selections['color_by'] in all_cols else 0,
                         key=f"{stage}_color"
                     )
                 else:
@@ -315,6 +533,7 @@ def create_base_viewer(df, stage="base"):
                     size_by = st.selectbox(
                         "Size By",
                         [None] + num_cols,
+                        index=([None] + num_cols).index(selections['size_by']) if selections['size_by'] in ([None] + num_cols) else 0,
                         key=f"{stage}_size"
                     )
 
@@ -345,7 +564,7 @@ def create_base_viewer(df, stage="base"):
                 if plot_type in ["scatter", "histogram", "boxplot", "violin"]:
                     opacity = st.slider(
                         "Opacity",
-                        min_value=0.1, max_value=1.0, value=0.7, step=0.1,
+                        min_value=0.1, max_value=1.0, value=selections.get('opacity', 0.7), step=0.1,
                         key=f"{stage}_opacity"
                     )
                 else:
@@ -355,7 +574,7 @@ def create_base_viewer(df, stage="base"):
                 hover_fields = st.multiselect(
                     "Hover Fields",
                     df.columns.tolist(),
-                    default=[],
+                    default=selections.get('hover_fields', []),
                     key=f"{stage}_hover_fields",
                     help="Additional columns to show when hovering over data points"
                 )
@@ -365,6 +584,7 @@ def create_base_viewer(df, stage="base"):
                 with st.expander("Trendlines", expanded=False):
                     show_trendlines = st.checkbox(
                         "Show Trendlines",
+                        value=selections.get('show_trendlines', False),
                         key=f"{stage}_show_trendlines",
                         help="Connect points into lines based on grouping"
                     )
@@ -373,6 +593,7 @@ def create_base_viewer(df, stage="base"):
                         trend_by = st.selectbox(
                             "Line Groups",
                             df.columns.tolist(),
+                            index=df.columns.tolist().index(selections['trend_by']) if selections.get('trend_by') in df.columns.tolist() else 0,
                             key=f"{stage}_trend_by",
                             help="Connect points with same value in this column"
                         )
@@ -383,7 +604,7 @@ def create_base_viewer(df, stage="base"):
                                 "Groups (bins)",
                                 min_value=2,
                                 max_value=20,
-                                value=5,
+                                value=selections.get('trend_bins', 5),
                                 key=f"{stage}_trend_bins",
                                 help="Number of groups to divide continuous data into"
                             )
@@ -394,7 +615,7 @@ def create_base_viewer(df, stage="base"):
                             "Line Opacity",
                             min_value=0.1,
                             max_value=1.0,
-                            value=0.85,
+                            value=selections.get('line_opacity', 0.85),
                             step=0.1,
                             key=f"{stage}_line_opacity",
                             help="Opacity of the trendlines"
@@ -402,7 +623,7 @@ def create_base_viewer(df, stage="base"):
 
                         show_points_with_lines = st.checkbox(
                             "Show Points",
-                            value=True,
+                            value=selections.get('show_points_with_lines', True),
                             key=f"{stage}_show_points_with_lines",
                             help="Show individual points in addition to trendlines"
                         )
@@ -412,13 +633,13 @@ def create_base_viewer(df, stage="base"):
             if plot_type in ["histogram", "hexbin"]:
                 n_bins = st.slider(
                     "Bins",
-                    min_value=5, max_value=20, value=10, step=1,
+                    min_value=5, max_value=20, value=selections.get('n_bins', 10), step=1,
                     key=f"{stage}_bins"
                 )
             elif plot_type in ["boxplot", "violin"]:
                 n_bins = st.slider(
                     "Bins (for continuous X)",
-                    min_value=5, max_value=20, value=10, step=1,
+                    min_value=5, max_value=20, value=selections.get('n_bins', 10), step=1,
                     key=f"{stage}_bins",
                     help="Used to bin continuous X variables for categorical display"
                 )
@@ -427,6 +648,7 @@ def create_base_viewer(df, stage="base"):
             st.subheader("Filter")
             filter_text = st.text_input(
                 "Filter Expression",
+                value=selections.get('filter_text', ''),
                 placeholder="column_name >= 100 & other_column != 50",
                 help="Use & for AND, | for OR",
                 key=f"{stage}_filter"
@@ -442,9 +664,11 @@ def create_base_viewer(df, stage="base"):
 
             # Advanced Filter
             with st.expander("Advanced Filter", expanded=False):
+                filter_options = ["Categorical Values", "Hyperparameter Combinations"]
                 filter_mode = st.radio(
                     "Filter Mode",
-                    ["Categorical Values", "Hyperparameter Combinations"],
+                    filter_options,
+                    index=filter_options.index(selections.get('filter_mode', 'Categorical Values')),
                     key=f"{stage}_filter_mode",
                     help="Choose between categorical filtering or hyperparameter grid filtering"
                 )
@@ -453,9 +677,11 @@ def create_base_viewer(df, stage="base"):
                     st.markdown("**Select by Categorical Values**")
 
                     # Select categorical column to filter
+                    cat_options = [None] + cat_cols + [col for col in df.columns if col not in num_cols and col not in cat_cols]
                     cat_filter_col = st.selectbox(
                         "Filter by Column",
-                        [None] + cat_cols + [col for col in df.columns if col not in num_cols and col not in cat_cols],
+                        cat_options,
+                        index=cat_options.index(selections.get('cat_filter_col')) if selections.get('cat_filter_col') in cat_options else 0,
                         key=f"{stage}_cat_filter_col",
                         help="Select a categorical column to filter by specific values"
                     )
@@ -468,6 +694,7 @@ def create_base_viewer(df, stage="base"):
                         selected_vals = st.multiselect(
                             f"Select {cat_filter_col} values",
                             unique_vals,
+                            default=selections.get('cat_filter_vals', []),
                             key=f"{stage}_cat_filter_vals",
                             help="Select one or more values to include"
                         )
@@ -480,7 +707,7 @@ def create_base_viewer(df, stage="base"):
                     # Checkbox to hide columns with only 1 value
                     hide_single_values = st.checkbox(
                         "Hide columns of 1",
-                        value=True,
+                        value=selections.get('hide_single_values', True),
                         key=f"{stage}_hide_single_values",
                         help="Hide columns that have only one possible value based on current filters"
                     )
@@ -507,7 +734,7 @@ def create_base_viewer(df, stage="base"):
                         # Initialize selections list in session state if not exists
                         selections_key = f"{stage}_hyper_selections"
                         if selections_key not in st.session_state:
-                            st.session_state[selections_key] = []
+                            st.session_state[selections_key] = selections.get('hyper_selections', [])
 
                         current_selection = {}
                         for col in discrete_cols:
@@ -616,17 +843,22 @@ def create_base_viewer(df, stage="base"):
             group_by_col = st.selectbox(
                 "Group By Column",
                 [None] + df.columns.tolist(),
+                index=([None] + df.columns.tolist()).index(selections.get('group_by')) if selections.get('group_by') in ([None] + df.columns.tolist()) else 0,
                 key=f"{stage}_group_by",
                 help="Group data by this column and aggregate"
             )
 
             if group_by_col:
+                agg_options = ["mean", "median", "sum", "count", "min", "max"]
                 agg_method = st.selectbox(
                     "Aggregation Method",
-                    ["mean", "median", "sum", "count", "min", "max"],
+                    agg_options,
+                    index=agg_options.index(selections.get('agg_method', 'mean')),
                     key=f"{stage}_agg_method",
                     help="How to aggregate numeric values within each group"
                 )
+
+    # Now start the viz section
     with col2:
         st.subheader("Visualization")
         
@@ -678,7 +910,7 @@ def create_base_viewer(df, stage="base"):
                 df_plot['x_transformed'] = apply_transform(df_plot, x_axis, x_transform)
                 x_col = 'x_transformed'
                 x_label = f"{x_transform.replace('x', x_axis)}"
-            except (ValueError, TypeError, KeyError, AttributeError):
+            except Exception as e:
                 x_col = x_axis
                 x_label = x_axis
                 st.warning(f"X transform failed: {x_transform}")
@@ -691,7 +923,7 @@ def create_base_viewer(df, stage="base"):
                 df_plot['y_transformed'] = apply_transform(df_plot, y_axis, y_transform)
                 y_col = 'y_transformed'
                 y_label = f"{y_transform.replace('x', y_axis)}"
-            except (ValueError, TypeError, KeyError, AttributeError):
+            except Exception as e:
                 y_col = y_axis
                 y_label = y_axis
                 st.warning(f"Y transform failed: {y_transform}")
@@ -840,7 +1072,7 @@ def create_base_viewer(df, stage="base"):
                 # Group all other colored traces (scatter points, histograms, etc.)
                 elif color_by:
                     trace.update(
-                        legendgroup="colors", 
+                        legendgroup="colors",
                         legendgrouptitle_text=f"Color: {clean_label(color_by)}"
                     )
             
@@ -853,7 +1085,7 @@ def create_base_viewer(df, stage="base"):
                     tracegroupgap=15,
                     title=None
                 ) if (show_trendlines or color_by) else {},
-                coloraxis_colorbar=dict(title="")
+                coloraxis_colorbar=dict(x=1.1)
             )
             
             st.plotly_chart(fig, width='stretch')
