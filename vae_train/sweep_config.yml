@@ -55,6 +55,12 @@ parameters:
   ema:
     value: 0.97
 
+  use_skips:
+    value: true
+
+  use_bn:
+    value: true
+
 # Command to run (uses uv if available)
 #command:
 #  - ${env}
