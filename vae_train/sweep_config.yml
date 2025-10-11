@@ -20,15 +20,15 @@ parameters:
 
   dropout:
     min: 0.2
-    max: 0.6
+    max: 0.4
     distribution: uniform
 
   activation:
-    values: ['GELU', 'ReLU', 'SiLU', 'LeakyReLU']
+    values: ['GELU', 'ReLU', 'SiLU']
 
   # Training parameters
   batch_size:
-    values: [128, 256]
+    value: 128
 
   learning_rate:
     min: 0.0001
@@ -41,12 +41,12 @@ parameters:
     distribution: log_uniform_values
 
   beta_final:
-    min: 0.1
-    max: 3.0
+    min: 0.01
+    max: 1
     distribution: uniform
 
   warmup_epochs:
-    values: [5, 10]
+    values: [2, 5, 7]
 
   # Fixed parameters
   epochs:
