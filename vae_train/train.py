@@ -50,9 +50,9 @@ config = dict(
     ema=0.97,
 )
 
-def train(config=None):
+def train(config=None, project="vae_sweep"):
     # Initialize a new wandb run
-    with wandb.init(project="vae_sweep", config=config) as run:
+    with wandb.init(project=project, config=config) as run:
         config = wandb.config
 
         # Set device

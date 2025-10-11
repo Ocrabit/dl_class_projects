@@ -20,4 +20,4 @@ if __name__ == '__main__':
     parser.add_argument('--use_bn', type=lambda x: x.lower() == 'true', default=True)
 
     args = parser.parse_args()
-    train(vars(args))
+    train(config=vars(args), project="final_6_vae")
