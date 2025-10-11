@@ -126,6 +126,8 @@ def train(config=None):
 
                 wandb.log({
                     "step": global_step,
+                    "epoch": epoch + 1,
+                    "val_mode": False,
                     "train_loss_ema": train_loss_avg,
                     "train_loss": loss.item(),
                     "recon_loss": recon_loss.item(),
@@ -205,9 +207,19 @@ def train(config=None):
             mu_mean = mu_all.mean().item()
             mu_std = mu_all.std().item()
 
+            # Composite metric: penalize model complexity
+            # Penalize both total params and latent dimensionality
+            param_penalty = total_params / 1e6 * 0.1  # 0.1 per million params
+            latent_penalty = config.latent_dim / 100 * 0.05  # 0.05 per 100 latent dims
+            composite_loss = val_loss + param_penalty + latent_penalty
+
             wandb.log({
                 "epoch": epoch + 1,
+                "val_mode": True,
                 "val_loss": val_loss,  # lower is better (overall objective)
+                "composite_loss": composite_loss,  # val_loss + complexity penalties
+                "param_penalty": param_penalty,
+                "latent_penalty": latent_penalty,
                 "val_recon_loss": val_recon,  # lower is better (BCE reconstruction)
                 "val_kl_loss": val_kl,  # moderate is best (too low = underfitting, too high = posterior collapse)
                 "mu_mean": mu_mean,  # should be near 0 (well-regularized)
