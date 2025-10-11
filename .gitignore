@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data
+data/
+local
+models/
+wandb/
+
+# OS
+.DS_Store
+.python-version
+
+# Sweep outputs
+flow_sweep/
+
+# Git repo..
+2025-LeaderboardContest/

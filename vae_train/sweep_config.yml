@@ -1,0 +1,57 @@
+program: train.py
+method: bayes
+metric:
+  goal: minimize
+  name: val_loss
+
+# Run 50 experiments with Bayesian optimization
+count: 50
+
+parameters:
+  # VAE Architecture parameters
+  latent_dim:
+    values: [7, 13, 21]
+
+  base_channels:
+    values: [16, 24, 32]
+
+  blocks_per_level:
+    values: [1, 2, 3]
+
+  groups:
+    values: [1, 2, 4]
+
+  dropout:
+    values: [0.3, 0.4, 0.5]
+
+  # Training parameters
+  batch_size:
+    values: [128, 256]
+
+  learning_rate:
+    values: [1e-3, 2e-3, 5e-3]
+
+  weight_decay:
+    values: [1e-5, 5e-5]
+
+  beta_final:
+    values: [0.5, 1.0, 2.0]
+
+  warmup_epochs:
+    values: [5, 10]
+
+  # Fixed parameters
+  epochs:
+    value: 50
+
+  ema:
+    value: 0.97
+
+# Command to run (uses uv if available)
+command:
+  - ${env}
+  - uv
+  - run
+  - python
+  - ${program}
+  - ${args}
