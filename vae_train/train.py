@@ -241,7 +241,12 @@ def train(config=None, project="vae_sweep"):
             os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
 
             # Create unique filename with run ID
-            sweep_name = wandb.sweep.name
+            # Check if running in a sweep or standalone
+            if hasattr(wandb.run, 'sweep_id') and wandb.run.sweep_id is not None:
+                sweep_name = wandb.run.sweep_id
+            else:
+                sweep_name = "standalone"
+
             run_id = wandb.run.name
             save_name = f"{sweep_name}_{run_id}.safetensors"
             save_path = os.path.join(MODEL_SAVE_PATH, save_name)
