@@ -266,7 +266,7 @@ class ResNetVAE(nn.Module):
         return z, x_hat, mu, log_var, z_hat
 
 @torch.no_grad()
-def test_inference(model, test_ds, idx=None, return_fig=False):
+def test_inference(model, test_ds, idx=None, return_fig=False, in_train=False):
     device = next(model.parameters()).device
     model.eval()
     if idx is None: idx = torch.randint(len(test_ds), (1,))[0]
@@ -287,10 +287,11 @@ def test_inference(model, test_ds, idx=None, return_fig=False):
             axs[1,0].set_ylabel('Reconstruction', fontsize=12)
     model.train()
     if return_fig: return fig
-    plt.show()
+
+    if not in_train: plt.show()  # Second security
 
 @torch.no_grad()
-def test_inference_spatial(model, test_ds, idx=None, return_fig=False):
+def test_inference_spatial(model, test_ds, idx=None, return_fig=False, in_train=False):
     device = next(model.parameters()).device
     model.eval()
     if idx is None: idx = torch.randint(len(test_ds), (1,))[0]
@@ -324,13 +325,13 @@ def test_inference_spatial(model, test_ds, idx=None, return_fig=False):
 
     model.train()
     if return_fig: return fig
-    plt.show()
+    if not in_train: plt.show()  # Second security
 
 def log_example_images(model, test_ds, epoch, spatial=True, n=5):
     if wandb.run is None:
         return
     fig = (test_inference_spatial if spatial else test_inference)(
-        model, test_ds, idx=range(n), return_fig=True
+        model, test_ds, idx=range(n), return_fig=True, in_train=True
     )
     wandb.log({"reconstructions": wandb.Image(fig), "epoch": epoch})
     plt.close(fig)
