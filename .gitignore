@@ -27,3 +27,6 @@ flow_sweep/
 
 # Git repo..
 2025-LeaderboardContest/
+
+# IDE
+.idea/
