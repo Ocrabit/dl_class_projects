@@ -5,26 +5,6 @@ import torch.nn.functional as F
 import wandb
 from math import log2
 
-
-class ResidualBlock(nn.Module):
-    def __init__(self, channels, use_skip=True, use_bn=True, act=nn.GELU, dropout=0.4, groups=1):
-        super().__init__()
-        self.dropout = dropout
-        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=not use_bn, groups=groups)
-        self.bn1 = nn.BatchNorm2d(channels) if use_bn else nn.Identity()
-        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=not use_bn, groups=groups)
-        self.bn2 = nn.BatchNorm2d(channels) if use_bn else nn.Identity()
-        self.use_skip, self.act = use_skip, act
-
-    def forward(self, x):
-        if self.use_skip: x0 = x
-        out = self.act()(self.bn1(self.conv1(x)))
-        out = F.dropout(out, self.dropout, training=self.training)
-        out = self.bn2(self.conv2(out))
-        if self.use_skip: out = out + x0
-        return self.act()(out)
-
-
 class ResNetVAEEncoder(nn.Module):
     """this makes a 1D vector of length latent_dim"""
 
@@ -57,7 +37,6 @@ class ResNetVAEEncoder(nn.Module):
         mean, logvar = x.chunk(2, dim=1)  # mean and log variance
         return mean, logvar
 
-
 class ResNetVAEDecoder(nn.Module):
     """this is just the mirror image of ResNetVAEEnoder"""
 
@@ -85,7 +64,6 @@ class ResNetVAEDecoder(nn.Module):
                 x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
                 x = self.transitions[i](x)
         return self.final_conv(x)
-
 
 class ResNetVAEEncoderSpatial(nn.Module):
     "this shrinks down to a wee image for its latents, e.g. for MNIST: 1x28x28 -> 1x7x7 for two downsampling operations"
@@ -117,7 +95,6 @@ class ResNetVAEEncoderSpatial(nn.Module):
         mean, logvar = x.chunk(2, dim=1)  # mean and log variance
         return mean, logvar
 
-
 class ResNetVAEDecoderSpatial(nn.Module):
     """this is just the mirror image of ResNetVAEEnoderSpatial"""
 
@@ -145,6 +122,47 @@ class ResNetVAEDecoderSpatial(nn.Module):
                 x = self.transitions[i](x)
         return self.final_conv(x)
 
+class ResNetVAE(nn.Module):
+    """Main VAE class"""
+
+    def __init__(self,
+                 data_channels=1,  # 1 channel for MNIST, 3 for CFAR10, etc.
+                 latent_dim=3,  # dimensionality of the latent space. bigger=less compression, better reconstruction
+                 act=nn.GELU,
+                 spatial=True,
+                 ):
+        super().__init__()
+        if spatial:
+            self.encoder = ResNetVAEEncoderSpatial(data_channels, latent_channels=1, act=act)
+            self.decoder = ResNetVAEDecoderSpatial(data_channels, latent_channels=1, act=act)
+        else:
+            self.encoder = ResNetVAEEncoder(data_channels, latent_dim=latent_dim, act=act)
+            self.decoder = ResNetVAEDecoder(data_channels, latent_dim=latent_dim, act=act)
+
+    def forward(self, x):
+        mu, log_var = self.encoder(x)
+        z = torch.cat([mu, log_var], dim=1)  # this is unnecessary/redundant but our other Lesson code expects z
+        z_hat = mu + torch.exp(0.5 * log_var) * torch.randn_like(mu)
+        x_hat = self.decoder(z_hat)
+        return z, x_hat, mu, log_var, z_hat
+
+class ResidualBlock(nn.Module):
+    def __init__(self, channels, use_skip=True, use_bn=True, act=nn.GELU, dropout=0.4, groups=1):
+        super().__init__()
+        self.dropout = dropout
+        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=not use_bn, groups=groups)
+        self.bn1 = nn.BatchNorm2d(channels) if use_bn else nn.Identity()
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=not use_bn, groups=groups)
+        self.bn2 = nn.BatchNorm2d(channels) if use_bn else nn.Identity()
+        self.use_skip, self.act = use_skip, act
+
+    def forward(self, x):
+        if self.use_skip: x0 = x
+        out = self.act()(self.bn1(self.conv1(x)))
+        out = F.dropout(out, self.dropout, training=self.training)
+        out = self.bn2(self.conv2(out))
+        if self.use_skip: out = out + x0
+        return self.act()(out)
 
 class InspoResNetVAEEncoder(nn.Module):
     """this makes a 1D vector of length latent_dim"""
@@ -287,7 +305,6 @@ class InspoResNetVAEDecoder(nn.Module):
                 x = self.transitions[i](x)
         return self.final_conv(x)
 
-
 class InspoResNetVAE(nn.Module):
     """Inspo version of a Main VAE class"""
     def __init__(self, latent_shape=(3,), act=nn.GELU, use_skips=True, use_bn=True, base_channels=32, blocks_per_level=3, groups=1, dropout=0.4):
@@ -362,31 +379,6 @@ class InspoResNetVAE(nn.Module):
             "channels": self.channels,
             "model_class": self.__class__.__name__
         }
-
-
-class ResNetVAE(nn.Module):
-    """Main VAE class"""
-
-    def __init__(self,
-                 data_channels=1,  # 1 channel for MNIST, 3 for CFAR10, etc.
-                 latent_dim=3,  # dimensionality of the latent space. bigger=less compression, better reconstruction
-                 act=nn.GELU,
-                 spatial=True,
-                 ):
-        super().__init__()
-        if spatial:
-            self.encoder = ResNetVAEEncoderSpatial(data_channels, latent_channels=1, act=act)
-            self.decoder = ResNetVAEDecoderSpatial(data_channels, latent_channels=1, act=act)
-        else:
-            self.encoder = ResNetVAEEncoder(data_channels, latent_dim=latent_dim, act=act)
-            self.decoder = ResNetVAEDecoder(data_channels, latent_dim=latent_dim, act=act)
-
-    def forward(self, x):
-        mu, log_var = self.encoder(x)
-        z = torch.cat([mu, log_var], dim=1)  # this is unnecessary/redundant but our other Lesson code expects z
-        z_hat = mu + torch.exp(0.5 * log_var) * torch.randn_like(mu)
-        x_hat = self.decoder(z_hat)
-        return z, x_hat, mu, log_var, z_hat
 
 @torch.no_grad()
 def test_inference(model, test_ds, idx=None, return_fig=False, in_train=False):
