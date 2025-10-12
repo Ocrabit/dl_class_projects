@@ -1,6 +1,7 @@
 import os
 import sys
 import warnings
+import math
 
 # Use plot lib gui for training
 os.environ["MPLBACKEND"] = "Agg"
@@ -37,8 +38,8 @@ train_ds = MNIST(root='./data', train=True, download=True, transform=ToTensor())
 test_ds = MNIST(root='./data', train=False, download=True, transform=ToTensor())
 
 # Hyperparameter defaults
-config = dict(
-    latent_dim=13,
+default_config = dict(
+    latent_shape=(1,7,7),
     base_channels=16,
     blocks_per_level=2,
     groups=1,
@@ -57,7 +58,10 @@ config = dict(
     ema=0.97,
 )
 
-def train(config=None, project="vae_sweep"):
+def train(config=None, project="vae_conv_testing"):
+    if config is None:
+        config = default_config
+
     # Initialize a new wandb run
     with wandb.init(project=project, config=config) as run:
         config = wandb.config
@@ -80,9 +84,26 @@ def train(config=None, project="vae_sweep"):
         train_loader = DataLoader(train_ds, batch_size=config.batch_size, num_workers=2, shuffle=True, persistent_workers=True)
         val_loader = DataLoader(test_ds, batch_size=config.batch_size, num_workers=2, shuffle=False, persistent_workers=True)
 
+        # Parse latent_shape (supports both old latent_dim and new latent_shape)
+        if hasattr(config, 'latent_shape'):
+            # Convert to tuple if it's a list or int (from wandb YAML)
+            if isinstance(config.latent_shape, (list, tuple)):
+                latent_shape = tuple(config.latent_shape)
+            elif isinstance(config.latent_shape, int):
+                latent_shape = (config.latent_shape,)
+            else:
+                latent_shape = config.latent_shape
+        elif hasattr(config, 'latent_dim'):
+            latent_shape = (config.latent_dim,)
+        else:
+            latent_shape = (1,7,7)  # fallback default
+
+        # Calculate total latent dimensions
+        latent_dim_total = math.prod(latent_shape)
+
         # Create model
         model = InspoResNetVAE(
-            latent_dim=config.latent_dim,
+            latent_shape=latent_shape,
             act=act_fn,
             use_skips=config.use_skips,
             use_bn=config.use_bn,
@@ -98,6 +119,7 @@ def train(config=None, project="vae_sweep"):
         # Build config dict
         config_update = {
             "total_params": total_params,
+            "latent_dim": latent_dim_total,
             "model_class": model.__class__.__name__
         }
         if hasattr(model, 'config'): config_update["model_config"] = model.config
@@ -219,19 +241,10 @@ def train(config=None, project="vae_sweep"):
                 mu_mean = mu_all.mean().item()
                 mu_std = mu_all.std().item()
 
-                # Composite metric: penalize model complexity
-                # Penalize both total params and latent dimensionality
-                param_penalty = total_params / 1e6 * 0.1  # 0.1 per million params
-                latent_penalty = config.latent_dim / 100 * 0.05  # 0.05 per 100 latent dims
-                composite_loss = val_loss + param_penalty + latent_penalty
-
                 wandb.log({
                     "epoch": epoch + 1,
                     "val_mode": True,
                     "val_loss": val_loss,  # lower is better (overall objective)
-                    "composite_loss": composite_loss,  # val_loss + complexity penalties
-                    "param_penalty": param_penalty,
-                    "latent_penalty": latent_penalty,
                     "val_recon_loss": val_recon,  # lower is better (BCE reconstruction)
                     "val_kl_loss": val_kl,  # moderate is best (too low = underfitting, too high = posterior collapse)
                     "mu_mean": mu_mean,  # should be near 0 (well-regularized)
