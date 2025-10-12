@@ -31,7 +31,7 @@ from models import InspoResNetVAE, log_example_images
 
 # Model save path
 MODEL_SAVE_PATH = os.path.join(project_dir, 'models/safetensors/vae/')
-LOG_IMAGES_EVERY = 5  # Log example images every N epochs
+LOG_IMAGES_EVERY = 1  # Log example images every N epochs
 
 # Load data once (outside train function for sweep efficiency)
 train_ds = MNIST(root='./data', train=True, download=True, transform=ToTensor())
