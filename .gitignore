@@ -16,6 +16,7 @@ env/
 data/
 local
 models/
+checkpoints/
 wandb/
 
 # OS
