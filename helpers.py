@@ -8,6 +8,7 @@ import os
 from numpy.lib.format import open_memmap
 import plotly.express as px
 import matplotlib.pyplot as plt
+import sklearn
 
 class EncodedDataset(Dataset):
     def __init__(self, dataset_path, split="train", add_channel=True, mmap=True):
@@ -312,6 +313,19 @@ def plot_generated(gen_xhat, nrow=5):
 
     plt.tight_layout()
     plt.show()
+
+
+def create_model_suffix(latent_shape, specifications):
+    """Create suffix from latent_shape and specs dict. E.g. (1,7,7) + {"base_channels": 16} -> "l7x7_ba16" """
+    if len(latent_shape) == 3:
+        latent_str = 'x'.join(map(str, latent_shape[1:]))  # last 2 dims
+    elif len(latent_shape) == 1:
+        latent_str = str(latent_shape[0])
+    else:  # len==2
+        latent_str = 'x'.join(map(str, latent_shape))
+
+    spec_str = '_'.join([f"{k[:2]}{v}" for k, v in specifications.items()])
+    return f"l{latent_str}_{spec_str}"
 
 
 def comparative_generate_samples(flow1, flow2, vae, latent_shape: tuple, n_samples: int, n_steps=100, latent_2d=False) -> torch.Tensor:
