@@ -1,5 +1,5 @@
 [project]
-name = "flow-experimentation"
+name = "dl-experimentation"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -19,7 +19,9 @@ dependencies = [
     "plotly>=6.3.0",
     "safetensors>=0.6.2",
     "scikit-image>=0.25.2",
+    "scikit-learn>=1.7.2",
     "torch>=2.8.0",
+    "torch-ema>=0.3",
     "torchaudio>=2.8.0",
     "torchvision>=0.23.0",
     "tqdm>=4.67.1",

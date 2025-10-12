@@ -8,7 +8,7 @@ parameters:
   # Latent shape comparison: non-spatial vs spatial
   latent_shape:
     values:
-      - [13]
+      - [49]
       - [1, 7, 7]
 
   # Architecture parameters to sweep
@@ -29,16 +29,16 @@ parameters:
     value: 128
 
   learning_rate:
-    value: 2e-3
+    value: 0.002
 
   weight_decay:
-    value: 5e-5
+    value: 0.00005
 
   epochs:
     value: 20
 
   beta_final:
-    value: 0.015
+    value: 0.105 # ugh I messed this up
 
   warmup_epochs:
     value: 5
