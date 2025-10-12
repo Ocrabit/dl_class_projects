@@ -453,25 +453,68 @@ def log_example_images(model, test_ds, epoch, spatial=True, n=5):
 
 
 # Conv Flow Models
+# ConvBlock with 3x3 conv2 (backup):
+# class ConvBlock(nn.Module):
+#     def __init__(self, in_ch, out_ch, act=nn.SiLU, use_skip=True):
+#         super().__init__()
+#         self.conv1 = nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1)
+#         self.conv2 = nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1)
+#         self.act = act
+#         self.use_skip = use_skip and (in_ch == out_ch)
+#         nn.init.zeros_(self.conv1.bias)
+#         nn.init.zeros_(self.conv2.bias)
+#     def forward(self, x):
+#         if self.use_skip: x0 = x
+#         out = self.act()(self.conv1(x))
+#         out = self.conv2(out)
+#         if self.use_skip: out = out + x0
+#         return self.act()(out)
+
 class ConvBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, act=nn.SiLU):
+    def __init__(self, in_ch, out_ch, act=nn.SiLU, use_skip=True, groups=1):
         super().__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1)
-        self.act = act()
-        # nn.init.kaiming_normal_(self.conv.weight, nonlinearity='relu')  # test later
-        nn.init.zeros_(self.conv.bias)  # start zero?
+        self.conv1 = nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, groups=groups)
+        self.conv2 = nn.Conv2d(out_ch, out_ch, kernel_size=1)  # 1x1 conv for channel mixing
+        self.act = act
+        self.use_skip = use_skip and (in_ch == out_ch)
+        # nn.init.kaiming_normal_(self.conv1.weight, nonlinearity='relu')
+        nn.init.zeros_(self.conv1.bias)
+        nn.init.zeros_(self.conv2.bias)
 
     def forward(self, x):
-        return self.act(self.conv(x))
+        if self.use_skip: x0 = x
+        out = self.act()(self.conv1(x))
+        out = self.conv2(out)
+        if self.use_skip: out = out + x0
+        return self.act()(out)
 
 class ConvFlowNet(nn.Module):
-    def __init__(self, latent_ch, hidden=32, depth=3, grow=True):
+    def __init__(self, latent_ch, hidden=32, depth=3, grow=True, time_embed_dim=32, act=nn.SiLU, use_skip=True, groups=1):
         super().__init__()
-        self.in_conv  = nn.Conv2d(latent_ch + 1, hidden, 3, padding=1)
+
+        # Store config
+        self.latent_ch = latent_ch
+        self.hidden = hidden
+        self.depth = depth
+        self.grow = grow
+        self.time_embed_dim = time_embed_dim
+        self.act = act
+        self.use_skip = use_skip
+        self.groups = groups
+
+        # Time embedding
+        self.time_embed = nn.Sequential(
+            nn.Linear(1, time_embed_dim),
+            act(),
+            nn.Linear(time_embed_dim, time_embed_dim)
+        )
+
+        # Input conv now takes latent + time embedding channels
+        self.in_conv = nn.Conv2d(latent_ch + time_embed_dim, hidden, 3, padding=1)
         channels = [hidden * (2**i) for i in range(depth)] if grow else [hidden] * depth
 
         self.blocks = nn.Sequential(
-            *[ConvBlock(in_ch, out_ch)
+            *[ConvBlock(in_ch, out_ch, act=act, use_skip=use_skip, groups=groups)
               for in_ch, out_ch in zip(channels[:-1], channels[1:])]
         )
 
@@ -480,12 +523,32 @@ class ConvFlowNet(nn.Module):
         nn.init.zeros_(self.out_conv.bias)
 
     def forward(self, z, t):
-        # z: [B,C,H,W], t: [B] or [B,1]
+        # z: [B,C,H,W], t: scalar, [B], or [B,1]
         B, C, H, W = z.shape
-        t_img = t.view(B, 1, 1, 1).expand(B, 1, H, W)
+        t = t.expand(B, 1)  # Handle all cases -> [B, 1]
+        t_embed = self.time_embed(t)  # [B, time_embed_dim]
+
+        # Broadcast time embedding to spatial dimensions
+        t_img = t_embed.view(B, -1, 1, 1).expand(B, -1, H, W)  # [B, time_embed_dim, H, W]
+
         h = F.silu(self.in_conv(torch.cat([z, t_img], dim=1)))
         h = self.blocks(h)
         return self.out_conv(h)
+
+    @property
+    def config(self):
+        """Return model configuration as dict for logging"""
+        return {
+            "latent_ch": self.latent_ch,
+            "hidden": self.hidden,
+            "depth": self.depth,
+            "grow": self.grow,
+            "time_embed_dim": self.time_embed_dim,
+            "use_skip": self.use_skip,
+            "groups": self.groups,
+            "act": self.act.__name__ if hasattr(self.act, '__name__') else str(self.act),
+            "model_class": self.__class__.__name__
+        }
 
 
 # Linear Flow Models
@@ -519,3 +582,77 @@ class SimpleFlowModel(nn.Module):
         t = t.expand(x.size(0), 1)  # Ensure t has the correct dimensions
         x = torch.cat([x, t], dim=1)
         return self.layers(x)
+
+
+class LinearResidualBlock(nn.Module):
+    """Linear version of ResidualBlock for flat flow models"""
+    def __init__(self, dim, use_skip=True, use_ln=True, act=nn.SiLU):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, dim, bias=not use_ln)
+        self.ln1 = nn.LayerNorm(dim) if use_ln else nn.Identity()
+        self.fc2 = nn.Linear(dim, dim, bias=not use_ln)
+        self.ln2 = nn.LayerNorm(dim) if use_ln else nn.Identity()
+        self.use_skip = use_skip
+        self.act = act
+
+    def forward(self, x):
+        if self.use_skip: x0 = x
+        out = self.act()(self.ln1(self.fc1(x)))
+        out = self.ln2(self.fc2(out))
+        if self.use_skip: out = out + x0
+        return self.act()(out)
+
+
+class InspoFlatVelocityNet(nn.Module):
+    """Flat flow model inspired by InspoResNetVAEEncoder architecture"""
+
+    def __init__(self, input_dim, base_channels=64, blocks_per_level=1, use_skips=True, use_ln=True,
+                 act=nn.SiLU, groups=1, time_embed_dim=32):
+        super().__init__()
+
+        # Time embedding
+        self.time_embed = nn.Sequential(
+            nn.Linear(1, time_embed_dim),
+            act(),
+            nn.Linear(time_embed_dim, time_embed_dim)
+        )
+
+        # Input projection with time
+        self.fc_in = nn.Linear(input_dim + time_embed_dim, base_channels, bias=not use_ln)
+        self.ln_in = nn.LayerNorm(base_channels) if use_ln else nn.Identity()
+
+        # Levels with transitions (like InspoResNetVAEEncoder)
+        channels = [base_channels, base_channels * 2, base_channels * 4]  # len(channels) = num levels
+        self.levels = nn.ModuleList(
+            [nn.ModuleList([LinearResidualBlock(ch, use_skips, use_ln, act=act)
+                           for _ in range(blocks_per_level)])
+             for ch in channels])
+        self.transitions = nn.ModuleList(
+            [nn.Linear(channels[i], channels[i + 1], bias=not use_ln) for i in range(len(channels) - 1)])
+
+        # Output projection
+        self.fc_out = nn.Linear(base_channels * 4, input_dim)
+
+        self.act = act
+        self.groups = groups
+
+    def forward(self, x, t):
+        # Time embedding
+        t = t.view(-1, 1) if t.dim() == 1 else t
+        t_embed = self.time_embed(t)
+
+        # Concatenate input with time embedding
+        x = torch.cat([x, t_embed], dim=-1)
+
+        # Input projection
+        x = self.act()(self.ln_in(self.fc_in(x)))
+
+        # Process through levels with transitions
+        for i in range(len(self.levels)):
+            if i > 0:  # transition to next level
+                x = self.transitions[i - 1](x)
+            for block in self.levels[i]:
+                x = block(x)
+
+        # Output projection
+        return self.fc_out(x)

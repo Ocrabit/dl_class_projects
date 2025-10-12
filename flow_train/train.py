@@ -67,10 +67,16 @@ def train(model, train_loader, val_loader, config=None, project='flow_experiment
 
         # Count parameters
         total_params = sum(p.numel() for p in model.parameters())
-        wandb.config.update({
+        config_dict = {
             "total_params": total_params,
             "model_class": model.__class__.__name__
-        })
+        }
+
+        # Add model config if available
+        if hasattr(model, 'config'):
+            config_dict.update(model.config)
+
+        wandb.config.update(config_dict)
         print(f"Training {model.__class__.__name__} with {total_params:,} parameters")
 
         # Training setup
@@ -211,7 +217,7 @@ def train(model, train_loader, val_loader, config=None, project='flow_experiment
         except Exception as e:
             print(f"Failed to save model: {e}")
 
-    return model
+    return model, ema
 
 
 if __name__ == '__main__':
@@ -219,10 +225,81 @@ if __name__ == '__main__':
     from models import ConvFlowNet
     from helpers import load_encoded_dataset
 
-    train_ds, test_ds = load_encoded_dataset('data/InspoResNetVAEEncoderSpatial_l7x7/MNIST')
+    train_ds, test_ds = load_encoded_dataset('../data/InspoResNetVAEEncoderSpatial_final/MNIST')
     train_loader = DataLoader(train_ds, batch_size=128, shuffle=True)
     val_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
 
-    flow_model = ConvFlowNet(latent_ch=1, hidden=32, depth=3, grow=True)
+    # Custom config for quick testing with small params
+    custom_config = dict(
+        learning_rate=5e-3,
+        weight_decay=0.0,
+        epochs=3000,
+        batch_size=128,
+        n_steps=20,
+        use_time_warp=True,
+        reflow_every=0,  # 0 = no reflow
+    )
 
-    train(flow_model, train_loader, val_loader)
+    flow_model = ConvFlowNet(
+        latent_ch=1,
+        hidden=64,           # Increased capacity
+        depth=3,             # Fewer layers
+        grow=True,
+        time_embed_dim=16,   # Small time embedding
+        use_skip=True,       # Use residual connections
+        groups=4             # Grouped convs for param efficiency
+    )
+
+    print(f"Total Params: {sum(p.numel() for p in flow_model.parameters())}")
+
+    trained_flow, flow_ema = train(flow_model, train_loader, val_loader, config=custom_config)
+
+    # Generate samples with trained flow
+    print("\nGenerating samples...")
+    from helpers import BasicModel, plot_generated, load_checkpoint
+    from models import InspoResNetVAE
+    from torch_ema import ExponentialMovingAverage
+
+    # Load the VAE that was used to encode the data
+    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
+
+    vae_7x7_config = dict(
+        latent_shape=(1, 7, 7),
+        base_channels=32,
+        blocks_per_level=1,
+        groups=4,
+        dropout=0.294905,
+        act=torch.nn.SiLU
+    )
+
+    vae_7x7 = InspoResNetVAE(**vae_7x7_config).to(device)
+    ema_7x7 = ExponentialMovingAverage(vae_7x7.parameters(), decay=0.9999)
+    checkpoint_7x7 = load_checkpoint(os.path.join(project_dir, 'models/7x7_epoch_2000.pt'), vae_7x7, ema=ema_7x7, device=device)
+
+    # Create BasicModel and generate samples using EMA parameters
+    basic = BasicModel(vae_7x7, trained_flow, (1, 7, 7)).to(device)
+
+    # Use EMA parameters for both VAE and flow when generating
+    with ema_7x7.average_parameters():
+        with flow_ema.average_parameters():
+            samples = basic.generate_samples(10, 15)
+
+    # Save figure to local/images folder
+    import matplotlib.pyplot as plt
+    from helpers import create_model_suffix
+
+    save_dir = os.path.join(project_dir, 'local', 'images')
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Create suffix from flow model config
+    flow_config_dict = flow_model.config.copy()
+    flow_config_dict['latent_shape'] = (1, 7, 7)  # Add latent shape for suffix
+    suffix = create_model_suffix(flow_config_dict)
+
+    run_name = wandb.run.name if (hasattr(wandb, 'run') and wandb.run) else f'flow_{suffix}'
+    save_path = os.path.join(save_dir, f'{run_name}.png')
+
+    plot_generated(samples)
+    plt.savefig(save_path)
+    print(f"Saved samples to: {save_path}")
+    plt.close()
