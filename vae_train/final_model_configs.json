@@ -1,0 +1,38 @@
+{
+    "configs": {
+        "spatial": {
+            "latent_shape": [1, 7, 7],
+            "base_channels": 32,
+            "blocks_per_level": 1,
+            "groups": 4,
+            "dropout": 0.294905,
+            "activation": "SiLU",
+            "use_skips": true,
+            "use_bn": true,
+            "batch_size": 128,
+            "learning_rate": 0.004303,
+            "weight_decay": 0.000039,
+            "epochs": 2000,
+            "beta_final": 0.105,
+            "warmup_epochs": 5,
+            "ema": 0.97
+        },
+        "flat": {
+            "latent_shape": 49,
+            "base_channels": 32,
+            "blocks_per_level": 1,
+            "groups": 4,
+            "dropout": 0.294905,
+            "activation": "SiLU",
+            "use_skips": true,
+            "use_bn": true,
+            "batch_size": 128,
+            "learning_rate": 0.004303,
+            "weight_decay": 0.000039,
+            "epochs": 2000,
+            "beta_final": 0.105,
+            "warmup_epochs": 5,
+            "ema": 0.97
+        }
+    }
+}
