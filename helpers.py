@@ -90,7 +90,7 @@ def get_latent_dtype_dim(encoder, loader, device=None):
     return mu.dtype, tuple(mu.squeeze(1).shape[1:])
 
 @torch.no_grad()
-def encode_dataset(model, train_dataloader, test_dataloader, dir_='data/', device=None, suffix: str = ''):
+def encode_dataset(model, train_dataloader, test_dataloader, dir_='data/', device=None, suffix: str = '', ema=None):
     # Some cheap checks
     assert hasattr(model, "encoder"), "Model must have an encoder attribute"
     assert model.encoder is not None, "Model encoder cannot be None"
@@ -103,42 +103,39 @@ def encode_dataset(model, train_dataloader, test_dataloader, dir_='data/', devic
 
     model_dir = model.encoder.__class__.__name__ + (suffix if suffix[0] == '_' else '_' + suffix)
 
-    for loader, mode in [(train_dataloader, 'train'), (test_dataloader, 'test')]:
-        print(f"Processing {mode} split...\n")
-        dataset_dir = loader.dataset.__class__.__name__
-        base_dir = os.path.join(dir_, model_dir, dataset_dir, mode)
-        os.makedirs(base_dir, exist_ok=True)
+    # Use EMA weights if provided
+    context = ema.average_parameters() if ema is not None else torch.no_grad()
 
-        batches = len(loader)
-        batch = i = 0
-        pbar = tqdm(loader, desc=f"Loader: {dataset_dir} {mode}", total=batches)
+    with context:
+        for loader, mode in [(train_dataloader, 'train'), (test_dataloader, 'test')]:
+            print(f"Processing {mode} split...")
+            dataset_dir = loader.dataset.__class__.__name__
+            base_dir = os.path.join(dir_, model_dir, dataset_dir, mode)
+            os.makedirs(base_dir, exist_ok=True)
 
-        latent_torch_dtype, latent_img_dim = get_latent_dtype_dim(encoder, loader)
-        latent_torch_dtype = str(latent_torch_dtype).replace("torch.", "")
-        dtype_target = str(loader.dataset.targets.dtype).replace("torch.", "")
-        N = loader.dataset.data.shape[0]
+            latent_torch_dtype, latent_img_dim = get_latent_dtype_dim(encoder, loader)
+            latent_torch_dtype = str(latent_torch_dtype).replace("torch.", "")
+            dtype_target = str(loader.dataset.targets.dtype).replace("torch.", "")
+            N = loader.dataset.data.shape[0]
 
-        data_mm   = open_memmap(os.path.join(base_dir, "data.npy"),   mode="w+", dtype=latent_torch_dtype, shape=(N, *latent_img_dim))
-        target_mm = open_memmap(os.path.join(base_dir, "target.npy"), mode="w+", dtype=dtype_target, shape=(N,))
+            data_mm = open_memmap(os.path.join(base_dir, "data.npy"),   mode="w+", dtype=latent_torch_dtype, shape=(N, *latent_img_dim))
+            target_mm = open_memmap(os.path.join(base_dir, "target.npy"), mode="w+", dtype=dtype_target, shape=(N,))
 
-        for batch_idx, (data, target) in enumerate(pbar):
-            data = data.to(device)
+            i = 0
+            for data, target in tqdm(loader, desc=f"{dataset_dir} {mode}"):
+                data = data.to(device)
 
-            mu, _ = encoder(data)
-            mu = mu.squeeze(1)
+                mu, _ = encoder(data)
+                mu = mu.squeeze(1)
 
-            b = mu.size(0)  # latent_batch_size
-            data_mm[i:i+b] = mu.detach().cpu().numpy()
-            target_mm[i:i+b] = target.detach().cpu().numpy()
-            i += b
+                b = mu.size(0)
+                data_mm[i:i+b] = mu.detach().cpu().numpy()
+                target_mm[i:i+b] = target.detach().cpu().numpy()
+                i += b
 
-            batch += 1
-            pbar.set_description(f'Loader: {dataset_dir} {mode} Batch {batch_idx+1}/{batches}')  # Update pbar
-
-        # Finish write
-        data_mm.flush()
-        target_mm.flush()
-        pbar.close()
+            # Finish write
+            data_mm.flush()
+            target_mm.flush()
 
 # Flow Helpers
 @torch.no_grad()
@@ -317,8 +314,17 @@ def plot_generated(gen_xhat, nrow=5):
     plt.show()
 
 
-def create_model_suffix(latent_shape, specifications):
-    """Create suffix from latent_shape and specs dict. E.g. (1,7,7) + {"base_channels": 16} -> "l7x7_ba16" """
+def create_model_suffix(specifications):
+    """Create suffix from specs dict (extracts latent_shape or latent_dim). E.g. {"latent_shape": (1,7,7), "base_channels": 16, "activation": "GELU"} -> "l7x7_ba16_acGELU" """
+    # Extract latent shape/dim from specifications
+    if 'latent_shape' in specifications:
+        latent_shape = specifications['latent_shape']
+    elif 'latent_dim' in specifications:
+        latent_shape = (specifications['latent_dim'],)
+    else:
+        raise ValueError("specifications must contain either 'latent_shape' or 'latent_dim'")
+
+    # Format latent string
     if len(latent_shape) == 3:
         latent_str = 'x'.join(map(str, latent_shape[1:]))  # last 2 dims
     elif len(latent_shape) == 1:
@@ -326,7 +332,23 @@ def create_model_suffix(latent_shape, specifications):
     else:  # len==2
         latent_str = 'x'.join(map(str, latent_shape))
 
-    spec_str = '_'.join([f"{k[:2]}{v}" for k, v in specifications.items()])
+    # Create spec string (excluding latent_shape/latent_dim since we already used it)
+    spec_items = {}
+    for k, v in specifications.items():
+        if k in ['latent_shape', 'latent_dim']:
+            continue
+
+        # Handle any value that's a class or has "<class" in string
+        if isinstance(v, type):  # e.g., nn.GELU class
+            v = v.__name__
+        elif isinstance(v, str) and "<class" in v:  # e.g., "<class 'torch.nn.modules.activation.GELU'>"
+            v = v.split(".")[-1].rstrip("'>")
+        elif hasattr(v, '__class__') and not isinstance(v, (str, int, float, bool)):  # instance
+            v = v.__class__.__name__
+
+        spec_items[k] = v
+
+    spec_str = '_'.join([f"{k[:2]}{v}" for k, v in spec_items.items()])
     return f"l{latent_str}_{spec_str}"
 
 
