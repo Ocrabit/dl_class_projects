@@ -9,6 +9,8 @@ from numpy.lib.format import open_memmap
 import plotly.express as px
 import matplotlib.pyplot as plt
 import sklearn
+from safetensors.torch import save_file, load_file
+from typing import Optional, Dict, Any
 
 class EncodedDataset(Dataset):
     def __init__(self, dataset_path, split="train", add_channel=True, mmap=True):
@@ -365,3 +367,58 @@ class BasicModel(nn.Module):
         self.vae.to(self.device)
         self.flow_model.to(self.device)
         return self
+
+
+# ============================================================================
+# Checkpoint Helpers
+# ============================================================================
+
+def save_checkpoint(
+    save_path: str,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    ema: Optional[Any] = None,
+    **extra_state
+) -> None:
+    """Save training checkpoint."""
+    os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else '.', exist_ok=True)
+
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }
+
+    if ema is not None:
+        checkpoint['ema_state_dict'] = ema.state_dict()
+
+    checkpoint.update(extra_state)
+
+    torch.save(checkpoint, save_path)
+    print(f"Checkpoint saved: {save_path} (epoch {epoch})")
+
+
+def load_checkpoint(
+    load_path: str,
+    model: nn.Module,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    ema: Optional[Any] = None,
+    device: Optional[torch.device] = None,
+) -> Dict[str, Any]:
+    """Load checkpoint and resume from saved epoch. Returns checkpoint dict."""
+    if device is None:
+        device = next(model.parameters()).device
+
+    checkpoint = torch.load(load_path, map_location=device)
+
+    model.load_state_dict(checkpoint['model_state_dict'])
+
+    if optimizer is not None and 'optimizer_state_dict' in checkpoint:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    if ema is not None and 'ema_state_dict' in checkpoint:
+        ema.load_state_dict(checkpoint['ema_state_dict'])
+
+    print(f"Checkpoint loaded: {load_path} (epoch {checkpoint['epoch']})")
+    return checkpoint

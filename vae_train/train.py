@@ -26,12 +26,18 @@ import torch.nn.functional as F
 from torch_ema import ExponentialMovingAverage
 from tqdm import tqdm
 from safetensors.torch import save_file
+import random
+import string
 
 from models import InspoResNetVAE, log_example_images
+from helpers import save_checkpoint, load_checkpoint
 
 # Model save path
 MODEL_SAVE_PATH = os.path.join(project_dir, 'models/safetensors/vae/')
+CHECKPOINT_PATH = os.path.join(project_dir, 'checkpoints/vae/')
 LOG_IMAGES_EVERY = 1  # Log example images every N epochs
+UPDATE_CURRENT_CHECKPOINT_EVERY = 25  # Update current.pt every N epochs
+CREATE_PERMANENT_CHECKPOINT_EVERY = 100  # Create epoch_N.pt every N epochs
 
 # Load data once (outside train function for sweep efficiency)
 train_ds = MNIST(root='./data', train=True, download=True, transform=ToTensor())
@@ -51,19 +57,28 @@ default_config = dict(
     batch_size=128,
     learning_rate=2e-3,
     weight_decay=5e-5,
-    epochs=20,
+    epochs=7,
 
     beta_final=1.0,
-    warmup_epochs=5,
+    warmup_epochs=1,
     ema=0.97,
 )
 
-def train(config=None, project="vae_conv_testing"):
-    if config is None:
+def train(config=None, project="vae_conv_testing", checkpoint_path=None):
+    # Get run ID from checkpoint if resuming
+    if checkpoint_path:
+        resume_id = torch.load(checkpoint_path, map_location='cpu').get('wandb_run_id')
+    else:
+        resume_id = None
+
+    # Use default config if none provided for new runs
+    if config is None and not resume_id:
         config = default_config
 
-    # Initialize a new wandb run
-    with wandb.init(project=project, config=config) as run:
+    # Initialize or resume wandb run
+    with wandb.init(project=project, config=config, id=resume_id, resume='must' if resume_id else False) as run:
+        if resume_id and config is not None:
+            wandb.config.update(config, allow_val_change=True)
         config = wandb.config
 
         # Set device
@@ -132,10 +147,17 @@ def train(config=None, project="vae_conv_testing"):
         optimizer = optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
         ema = ExponentialMovingAverage(model.parameters(), decay=0.9999)
 
+        # Load checkpoint if provided
+        start_epoch = 0
+        if checkpoint_path is not None:
+            ckpt = load_checkpoint(checkpoint_path, model, optimizer, ema=ema, device=device)
+            start_epoch = ckpt['epoch']
+            print(f"Resuming from epoch {start_epoch}")
+
         spatial = len(model.latent_shape) > 1 if hasattr(model, 'latent_shape') else False
         global_step = 0
 
-        for epoch in range(config.epochs):
+        for epoch in range(start_epoch, config.epochs):
             model.train()
 
             beta = config.beta_final * min((epoch + 1) / config.warmup_epochs, 1.0)
@@ -259,21 +281,30 @@ def train(config=None, project="vae_conv_testing"):
                 if (epoch + 1) % LOG_IMAGES_EVERY == 0:
                     log_example_images(model, val_loader.dataset, epoch + 1, spatial=spatial, n=5)
 
+            # Checkpoint saving
+            if (epoch + 1) % UPDATE_CURRENT_CHECKPOINT_EVERY == 0:
+                run_name = wandb.run.name if (hasattr(wandb, 'run') and wandb.run) else f"{model.__class__.__name__}_{''.join(random.choices(string.ascii_lowercase + string.digits, k=4))}"
+                run_checkpoint_dir = os.path.join(CHECKPOINT_PATH, run_name)
+                os.makedirs(run_checkpoint_dir, exist_ok=True)
+
+                save_checkpoint(os.path.join(run_checkpoint_dir, 'current.pt'), model, optimizer, epoch + 1, ema=ema, wandb_run_id=wandb.run.id)
+
+                if (epoch + 1) % CREATE_PERMANENT_CHECKPOINT_EVERY == 0:
+                    save_checkpoint(os.path.join(run_checkpoint_dir, f'epoch_{epoch + 1}.pt'), model, optimizer, epoch + 1, ema=ema, wandb_run_id=wandb.run.id)
+
         # Save model after training completes
         try:
-            # Create save directory if it doesn't exist
-            os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
-
-            # Create unique filename with run ID
-            # Check if running in a sweep or standalone
+            # Organize by sweep or standalone
             if hasattr(wandb.run, 'sweep_id') and wandb.run.sweep_id is not None:
-                sweep_name = wandb.run.sweep_id
+                sweep_dir = wandb.run.sweep_id
             else:
-                sweep_name = "standalone"
+                sweep_dir = "standalone"
 
-            run_id = wandb.run.name
-            save_name = f"{sweep_name}_{run_id}.safetensors"
-            save_path = os.path.join(MODEL_SAVE_PATH, save_name)
+            save_dir = os.path.join(MODEL_SAVE_PATH, sweep_dir)
+            os.makedirs(save_dir, exist_ok=True)
+
+            save_name = f"{wandb.run.name}.safetensors"
+            save_path = os.path.join(save_dir, save_name)
 
             # Save model state dict
             save_file(model.state_dict(), save_path)
@@ -286,4 +317,7 @@ def train(config=None, project="vae_conv_testing"):
             # Continue anyway - don't fail the run just because save failed
 
 if __name__ == '__main__':
-    train()
+    # checkpoint_path = r'../checkpoints/vae/fearless-deluge-32/current.pt'
+    train(
+        # checkpoint_path=checkpoint_path
+    )
