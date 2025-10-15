@@ -1,0 +1,17 @@
+# Config 1: stoic-sweep-74
+python run_custom_train.py --latent_dim 49 --base_channels 32 --blocks_per_level 3 --groups 1 --dropout 0.2185441407 --activation GELU --batch_size 128 --learning_rate 0.0005948955 --weight_decay 0.0000410963 --beta_final 0.105 --warmup_epochs 5 --epochs 200
+
+# Config 2: glowing-sweep-110
+python run_custom_train.py --latent_dim 49 --base_channels 16 --blocks_per_level 3 --groups 4 --dropout 0.4321827761 --activation ReLU --batch_size 128 --learning_rate 0.0078158864 --weight_decay 0.0000156571 --beta_final 0.105 --warmup_epochs 5 --epochs 200
+
+# Config 3: young-sweep-114
+python run_custom_train.py --latent_dim 49 --base_channels 24 --blocks_per_level 1 --groups 1 --dropout 0.3492226593 --activation ReLU --batch_size 128 --learning_rate 0.0035092503 --weight_decay 0.0000891406 --beta_final 0.105 --warmup_epochs 5 --epochs 200
+
+# Config 4: earthy-sweep-151
+python run_custom_train.py --latent_dim 49 --base_channels 24 --blocks_per_level 1 --groups 4 --dropout 0.3272772396 --activation GELU --batch_size 128 --learning_rate 0.0092067425 --weight_decay 0.0000023984 --beta_final 0.105 --warmup_epochs 5 --epochs 200
+
+# Config 5: silver-sweep-152
+python run_custom_train.py --latent_dim 49 --base_channels 32 --blocks_per_level 2 --groups 1 --dropout 0.2351344138 --activation SiLU --batch_size 128 --learning_rate 0.0007635732 --weight_decay 0.0000846928 --beta_final 0.105 --warmup_epochs 10 --epochs 200
+
+# Config 6: dainty-sweep-158
+python run_custom_train.py --latent_dim 49 --base_channels 32 --blocks_per_level 1 --groups 4 --dropout 0.2949052737 --activation SiLU --batch_size 128 --learning_rate 0.0043033275 --weight_decay 0.0000386567 --beta_final 0.105 --warmup_epochs 5 --epochs 200

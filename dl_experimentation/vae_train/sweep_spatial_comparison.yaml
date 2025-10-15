@@ -1,0 +1,54 @@
+program: train.py
+method: grid
+metric:
+  name: val_loss
+  goal: minimize
+
+parameters:
+  # Latent shape comparison: non-spatial vs spatial
+  latent_shape:
+    values:
+      - [49]
+      - [1, 7, 7]
+
+  # Architecture parameters to sweep
+  base_channels:
+    values: [16, 32]
+
+  blocks_per_level:
+    values: [2, 3]
+
+  dropout:
+    values: [0.3, 0.4]
+
+  groups:
+    values: [1, 2]
+
+  # Training hyperparameters (fixed for fair comparison)
+  batch_size:
+    value: 128
+
+  learning_rate:
+    value: 0.002
+
+  weight_decay:
+    value: 0.00005
+
+  epochs:
+    value: 20
+
+  beta_final:
+    value: 0.105 # ugh I messed this up
+
+  warmup_epochs:
+    value: 5
+
+  # Model architecture (fixed)
+  activation:
+    value: "GELU"
+
+  use_skips:
+    value: true
+
+  use_bn:
+    value: true
