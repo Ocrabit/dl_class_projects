@@ -41,6 +41,26 @@ config_final_flat = dict(
     ema=0.97,
 )
 
+config_small_sad_competition = dict(
+    latent_shape=16,
+    base_channels=16,
+    blocks_per_level=2,
+    groups=4,
+    dropout=0.3,
+    activation='GeLU',
+    use_skips=True,
+    use_bn=True,
+
+    batch_size=128,
+    learning_rate=0.005,
+    weight_decay=0.00004,
+    epochs=200,
+
+    beta_final=0.105,
+    warmup_epochs=5,
+    ema=0.97,
+)
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("Error: Mode not specified. Use 'spatial' or 'flat'")
@@ -57,6 +77,10 @@ if __name__ == '__main__':
         checkpoint_flat = r'..\checkpoints\vae\rich-hill-15\current.pt'
         print("Running flat config (49)")
         train(config=config_final_flat, project=project, checkpoint_path=checkpoint_flat)
+    elif mode == 'small-sad-competition':
+        # checkpoint_flat = r'..\checkpoints\vae\rich-hill-15\current.pt'
+        print("Running small-sad-competition config (16)")
+        train(config=config_small_sad_competition, project=project)
     else:
         print(f"Unknown mode: {mode}. Use 'spatial' or 'flat'")
         sys.exit(1)
