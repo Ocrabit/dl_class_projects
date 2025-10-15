@@ -1088,7 +1088,7 @@ def create_base_viewer(df, stage="base", use_fun_defaults=False):
                 coloraxis_colorbar=dict(x=1.1)
             )
             
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
         
         # Statistics
         st.subheader("Statistics")
