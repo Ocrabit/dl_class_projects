@@ -4,7 +4,7 @@ This repo uses `uv`.
 
 Run:
 ```bash
-uv sync
+uv sync --python 3.10
 ```
 
 This installs stable-audio-tools with Python 3.10, and updates jupyter and tqdm packages (for `tqdm.notebook` progress bars).
