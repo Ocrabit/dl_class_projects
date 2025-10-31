@@ -1,0 +1,4 @@
+[submodule "sao-guidance"]
+	path = sao-guidance
+	url = https://github.com/Ocrabit/sao-guidance.git
+	branch = main
